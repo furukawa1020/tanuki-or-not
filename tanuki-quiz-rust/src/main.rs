@@ -9,7 +9,7 @@ use image::{ImageBuffer, Rgba, DynamicImage, ImageOutputFormat};
 use std::io::Cursor;
 use bytes::Bytes;
 use axum::http::header;
-use tokio::fs;
+use rand::Rng;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -66,60 +66,31 @@ struct GeneratedQuiz {
 }
 
 async fn generate_quiz() -> Json<GeneratedQuiz> {
-    // ensure public/fetched exists
-    let mut fetched_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    fetched_dir.push("public");
-    fetched_dir.push("fetched");
-    let _ = fs::create_dir_all(&fetched_dir).await;
-
+    // Use free image source URLs (no download). We'll return external URLs that the client can load directly.
     let mut choices: Vec<GeneratedChoice> = Vec::new();
 
-    // Define categories (these are used as keys to generate images)
-    let categories = vec!["forest", "water", "urban", "animal"];
+    // categories and search keywords
+    let categories = vec![
+        ("forest", "forest,trees"),
+        ("water", "ocean,sea,water"),
+        ("urban", "city,street,building"),
+        ("animal", "animal,wildlife"),
+    ];
 
-    // base URL for constructing absolute image URLs (can be overridden with BASE_URL env var)
-    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let mut rng = rand::thread_rng();
 
-    // For each category, generate one image using the internal generator and save it under public/fetched/{category}
-    for (i, cat_key) in categories.iter().enumerate() {
-        let key = format!("{}{}", cat_key, i + 1);
-        let bytes = match generate_image_bytes(&key) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-
-        // save under public/fetched/{category}
-        let mut out_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        out_dir.push("public");
-        out_dir.push("fetched");
-        out_dir.push(cat_key);
-        let _ = fs::create_dir_all(&out_dir).await;
-        // remove existing files in this category to keep things tidy
-        if let Ok(mut entries) = fs::read_dir(&out_dir).await {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let _ = fs::remove_file(entry.path()).await;
-            }
-        }
-        let filename = format!("img_{}.png", i + 1);
-        let mut out_path = out_dir.clone();
-        out_path.push(&filename);
-        let _ = fs::write(&out_path, &bytes).await;
-
-        // make URL relative to `public/` so ServeDir serves it at `/fetched/...`
-        let public_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("public");
-        let rel_path = if let Ok(rp) = out_path.strip_prefix(&public_dir) { rp.to_path_buf() } else { out_path.clone() };
-        // normalize Windows backslashes to URL slashes
-        let image_url_path = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
-        let image_url = format!("{}{}", base_url.trim_end_matches('/'), image_url_path);
-
+    for (i, (cat_key, keywords)) in categories.iter().enumerate() {
+        // Use Unsplash Source to provide a random image for the keywords without downloading
+        // add a random sig parameter to try to avoid caching the same image
+        let sig: u64 = rng.gen();
+        let image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 
-    // Shuffle the choices so order isn't predictable
-    let mut rng = rand::thread_rng();
+    // Shuffle so order isn't predictable
     choices.shuffle(&mut rng);
 
-    // Pick a target category randomly from one of the generated choices
+    // select target category
     let target_cat = if let Some(c) = choices.choose(&mut rng) { c.category.clone() } else { "other".to_string() };
     let label = match target_cat.as_str() {
         "forest" => "森",

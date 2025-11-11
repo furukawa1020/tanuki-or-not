@@ -1,10 +1,15 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const quizImage = document.getElementById('quiz-image');
+    console.log('quizImage:', quizImage);
     const optionsContainer = document.getElementById('options');
+    console.log('optionsContainer:', optionsContainer);
     const resultText = document.getElementById('result-message');
+    console.log('resultText:', resultText);
     const shareContainer = document.getElementById('share-container');
+    console.log('shareContainer:', shareContainer);
     const shareButton = document.getElementById('share-button');
+    console.log('shareButton:', shareButton);
 
     let currentQuestion = null;
 
@@ -18,7 +23,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             currentQuestion = await response.json();
             
+            if (!currentQuestion || !currentQuestion.image_url) {
+                console.error("Received invalid question data:", currentQuestion);
+                resultText.textContent = "エラー: 無効なクイズデータを受信しました。";
+                return;
+            }
+
             quizImage.src = currentQuestion.image_url;
+            quizImage.onerror = () => {
+                console.error("Failed to load image:", currentQuestion.image_url);
+                resultText.textContent = "エラー: 画像の読み込みに失敗しました。";
+            };
             resultText.textContent = '';
             shareContainer.style.display = 'none';
             optionsContainer.innerHTML = '';

@@ -138,9 +138,15 @@ async fn proxy_image(Path(key): Path<String>, Query(params): Query<HashMap<Strin
         Ok(resp) => match resp.bytes().await {
             Ok(b) => {
                 let mut headers = axum::http::HeaderMap::new();
-                if let Some(ct) = resp.headers().get(axum::http::header::CONTENT_TYPE) {
-                    headers.insert(axum::http::header::CONTENT_TYPE, ct.clone());
-                } else {
+                // Convert reqwest header value to axum/http HeaderValue to avoid http-crate version mismatch
+                if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+                    if let Ok(ct_str) = ct.to_str() {
+                        if let Ok(hv) = axum::http::HeaderValue::from_str(ct_str) {
+                            headers.insert(axum::http::header::CONTENT_TYPE, hv);
+                        }
+                    }
+                }
+                if !headers.contains_key(axum::http::header::CONTENT_TYPE) {
                     headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/jpeg"));
                 }
                 (axum::http::StatusCode::OK, headers, Bytes::from(b)).into_response()

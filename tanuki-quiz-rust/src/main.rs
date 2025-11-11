@@ -107,8 +107,11 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
         out_path.push(&filename);
         let _ = fs::write(&out_path, &bytes).await;
 
-        let rel_path = out_path.strip_prefix(env::current_dir().unwrap_or_else(|_| PathBuf::from("."))).unwrap_or(&out_path);
-        let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\\\","/"));
+    // make URL relative to `public/` so ServeDir serves it at `/fetched/...`
+    let public_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("public");
+    let rel_path = if let Ok(rp) = out_path.strip_prefix(&public_dir) { rp.to_path_buf() } else { out_path.clone() };
+    // normalize Windows backslashes to URL slashes
+    let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
 
         choices.push(GeneratedChoice { id: i+1, image_url, category: cat_key.to_string() });
     }

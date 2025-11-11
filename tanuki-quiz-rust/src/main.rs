@@ -9,6 +9,9 @@ use image::{ImageBuffer, Rgba, DynamicImage, ImageOutputFormat};
 use std::io::Cursor;
 use bytes::Bytes;
 use axum::http::header;
+use reqwest::Client;
+use tokio::fs;
+use rand::Rng;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -48,6 +51,111 @@ fn get_all_questions() -> Vec<QuizQuestion> {
         QuizQuestion { id: 11, image_url: "/images/anaguma4.png".to_string(), answer: "アナグマ".to_string() },
         QuizQuestion { id: 12, image_url: "/images/hakubishin4.png".to_string(), answer: "ハクビシン".to_string() },
     ]
+}
+
+#[derive(Serialize)]
+struct GeneratedChoice {
+    id: usize,
+    image_url: String,
+    category: String,
+}
+
+#[derive(Serialize)]
+struct GeneratedQuiz {
+    question: String,
+    choices: Vec<GeneratedChoice>,
+}
+
+async fn generate_quiz() -> Json<GeneratedQuiz> {
+    // ensure public/fetched exists
+    let mut fetched_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    fetched_dir.push("public");
+    fetched_dir.push("fetched");
+    let _ = fs::create_dir_all(&fetched_dir).await;
+
+    let client = Client::new();
+    let mut choices: Vec<GeneratedChoice> = Vec::new();
+    let mut rng = rand::thread_rng();
+
+    // fetch 4 images
+    for i in 0..4usize {
+        let seed: u64 = rng.gen();
+        let url = format!("https://picsum.photos/seed/{}/800/600", seed);
+        let resp = client.get(&url).send().await;
+        if resp.is_err() {
+            continue;
+        }
+        let bytes = match resp.unwrap().bytes().await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        let filename = format!("fetched/img_{}.jpg", seed);
+        let mut out_path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        out_path.push("public");
+        out_path.push(&filename);
+        // write file
+        let _ = fs::write(&out_path, &bytes).await;
+
+        // analyze image: average color
+        let dyn = match image::load_from_memory(&bytes) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let thumb = dyn.thumbnail(80, 60);
+        let (w, h) = thumb.dimensions();
+        let mut r_sum: u64 = 0;
+        let mut g_sum: u64 = 0;
+        let mut b_sum: u64 = 0;
+        let mut cnt: u64 = 0;
+        for px in thumb.pixels() {
+            let p = px.2.to_rgb();
+            r_sum += p[0] as u64;
+            g_sum += p[1] as u64;
+            b_sum += p[2] as u64;
+            cnt += 1;
+        }
+        if cnt == 0 { continue; }
+        let r_avg = (r_sum / cnt) as u8;
+        let g_avg = (g_sum / cnt) as u8;
+        let b_avg = (b_sum / cnt) as u8;
+
+        let category = if g_avg > r_avg && g_avg > b_avg && g_avg > 100 {
+            "forest"
+        } else if b_avg > r_avg && b_avg > g_avg && b_avg > 100 {
+            "water"
+        } else if r_avg > g_avg && r_avg > b_avg && r_avg > 100 {
+            "warm"
+        } else {
+            "other"
+        };
+
+        let id = i + 1;
+        let image_url = format!("/{}", filename.replace("\\\\","/"));
+        choices.push(GeneratedChoice { id, image_url, category: category.to_string() });
+    }
+
+    // pick target category (prefer non-other)
+    let mut target_cat = "other".to_string();
+    for c in &choices {
+        if c.category != "other" {
+            target_cat = c.category.clone();
+            break;
+        }
+    }
+    if target_cat == "other" && !choices.is_empty() {
+        target_cat = choices[0].category.clone();
+    }
+
+    let label = match target_cat.as_str() {
+        "forest" => "森",
+        "water" => "海/空",
+        "warm" => "赤みのある景色",
+        _ => "特徴のある画像",
+    };
+
+    let question = format!("次の画像のうち、{} はどれですか？", label);
+    Json(GeneratedQuiz { question, choices })
 }
 
 async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {
@@ -164,6 +272,7 @@ async fn main() {
     // API routes registered first, then serve static files as the fallback.
     let app = Router::new()
         .route("/api/quiz", get(get_quiz_question))
+        .route("/api/generate_quiz", get(generate_quiz))
         .route("/images/:name", get(serve_image))
         .route("/api/submit", post(submit_answer))
         .nest_service("/", ServeDir::new(static_dir));

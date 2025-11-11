@@ -28,17 +28,17 @@ fn get_all_questions() -> Vec<QuizQuestion> {
     vec![
         QuizQuestion {
             id: 1,
-            image_url: "https://placehold.jp/400x300.png?text=たぬき？",
+            image_url: "https://placehold.jp/400x300.png?text=たぬき？".to_string(),
             answer: "たぬき".to_string(),
         },
         QuizQuestion {
             id: 2,
-            image_url: "https://placehold.jp/400x300.png?text=アナグマ？",
+            image_url: "https://placehold.jp/400x300.png?text=アナグマ？".to_string(),
             answer: "アナグマ".to_string(),
         },
         QuizQuestion {
             id: 3,
-            image_url: "https://placehold.jp/400x300.png?text=ハクビシン？",
+            image_url: "https://placehold.jp/400x300.png?text=ハクビシン？".to_string(),
             answer: "ハクビシン".to_string(),
         },
         // Add more questions as needed

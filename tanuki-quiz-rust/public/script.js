@@ -43,8 +43,46 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
         } catch (err) {
-            console.error('failed to load generated quiz', err);
-            questionText.textContent = 'クイズの読み込みに失敗しました。';
+            console.warn('failed to load /api/generate_quiz - falling back to client-side source images', err);
+            // Fallback: generate choices locally using Unsplash Source URLs so the UI works even if the Rust server isn't running
+            const fallbackCategories = [
+                { key: 'forest', keywords: 'forest,trees' },
+                { key: 'water', keywords: 'ocean,sea,water' },
+                { key: 'urban', keywords: 'city,street,building' },
+                { key: 'animal', keywords: 'animal,wildlife' },
+            ];
+            const rng = () => Math.floor(Math.random() * 1e9);
+            const choices = fallbackCategories.map((c, idx) => ({
+                id: idx + 1,
+                image_url: `https://source.unsplash.com/800x600/?${c.key},${c.key}&sig=${rng()}`,
+                category: c.key,
+            }));
+            // pick random answer
+            const answer_category = choices[Math.floor(Math.random() * choices.length)].category;
+            currentQuiz = { question: '次の画像のうち、どれが該当しますか？', choices, answer_category };
+
+            // render fallback
+            if (questionEl) questionEl.textContent = 'たぬき？クイズ';
+            questionText.textContent = currentQuiz.question || '';
+            optionsContainer.innerHTML = '';
+            choices.forEach(choice => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'choice-item';
+                const img = document.createElement('img');
+                img.src = choice.image_url;
+                img.alt = '選択肢';
+                img.className = 'choice-image';
+                img.onerror = () => img.style.opacity = '0.4';
+                wrapper.appendChild(img);
+
+                const btn = document.createElement('button');
+                btn.textContent = 'これだ！';
+                btn.className = 'option-button';
+                btn.onclick = () => checkAnswer(choice);
+                wrapper.appendChild(btn);
+
+                optionsContainer.appendChild(wrapper);
+            });
         }
     }
 

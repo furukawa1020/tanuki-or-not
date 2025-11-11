@@ -86,21 +86,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function checkAnswer(choice) {
+    async function checkAnswer(choice) {
         if (!currentQuiz) return;
-        const correct = choice.category === currentQuiz.answer_category;
-        if (correct) {
-            questionText.textContent = '正解！おめでとう🎉';
-        } else {
-            questionText.textContent = `残念！正解は「${currentQuiz.answer_category}」でした。`;
-        }
 
-        // disable all buttons
+        // disable all buttons immediately to avoid double-clicks
         const buttons = optionsContainer.getElementsByTagName('button');
         for (let b of buttons) b.disabled = true;
 
-        setupShareButton(correct);
-        shareContainer.style.display = 'block';
+        // try server-side authoritative validation first
+        try {
+            const res = await fetch('/api/submit_generated', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_category: choice.category, answer_category: currentQuiz.answer_category })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const correct = data.correct;
+                if (correct) {
+                    questionText.textContent = '正解！おめでとう🎉';
+                } else {
+                    questionText.textContent = `残念！正解は「${data.correct_answer}」でした。`;
+                }
+                setupShareButton(correct);
+                shareContainer.style.display = 'block';
+            } else {
+                // server returned non-OK: fallback to client-side
+                console.warn('/api/submit_generated returned', res.status);
+                fallbackLocalCheck(choice);
+            }
+        } catch (err) {
+            // network error or server unreachable: fallback
+            console.warn('failed to POST /api/submit_generated - falling back', err);
+            fallbackLocalCheck(choice);
+        }
 
         // add next question button
         const next = document.createElement('button');
@@ -110,6 +130,17 @@ document.addEventListener('DOMContentLoaded', () => {
         next.style.marginTop = '1rem';
         next.onclick = loadGeneratedQuiz;
         optionsContainer.appendChild(next);
+    }
+
+    function fallbackLocalCheck(choice) {
+        const correct = choice.category === currentQuiz.answer_category;
+        if (correct) {
+            questionText.textContent = '正解！おめでとう🎉';
+        } else {
+            questionText.textContent = `残念！正解は「${currentQuiz.answer_category}」でした。`;
+        }
+        setupShareButton(correct);
+        shareContainer.style.display = 'block';
     }
 
     function setupShareButton(correct) {

@@ -30,6 +30,13 @@ struct QuizResult {
     correct_answer: String,
 }
 
+// For generated-quiz submissions
+#[derive(Deserialize)]
+struct GeneratedSubmit {
+    selected_category: String,
+    answer_category: String,
+}
+
 fn get_all_questions() -> Vec<QuizQuestion> {
     vec![
         // たぬき (Tanuki)
@@ -70,10 +77,12 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     let mut choices: Vec<GeneratedChoice> = Vec::new();
 
     // categories and search keywords
+    // Prefer species-specific searches so choices can include たぬき/アナグマ/ハクビシン where possible.
+    // We keep a generic 'animal' fallback as a catch-all.
     let categories = vec![
-        ("forest", "forest,trees"),
-        ("water", "ocean,sea,water"),
-        ("urban", "city,street,building"),
+        ("tanuki", "tanuki,raccoon dog,狸"),
+        ("anaguma", "badger,anaguma,アナグマ"),
+        ("hakubishin", "masked palm civet,hakubishin,ハクビシン"),
         ("animal", "animal,wildlife"),
     ];
 
@@ -93,9 +102,9 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     // select target category
     let target_cat = if let Some(c) = choices.choose(&mut rng) { c.category.clone() } else { "other".to_string() };
     let label = match target_cat.as_str() {
-        "forest" => "森",
-        "water" => "海/空",
-        "urban" => "街並み/都市",
+        "tanuki" => "たぬき",
+        "anaguma" => "アナグマ",
+        "hakubishin" => "ハクビシン",
         "animal" => "動物",
         _ => "特徴のある画像",
     };
@@ -209,6 +218,14 @@ async fn submit_answer(Json(payload): Json<QuizAnswer>) -> Json<QuizResult> {
     })
 }
 
+async fn submit_generated(Json(payload): Json<GeneratedSubmit>) -> Json<QuizResult> {
+    let correct = payload.selected_category == payload.answer_category;
+    Json(QuizResult {
+        correct,
+        correct_answer: payload.answer_category.clone(),
+    })
+}
+
 #[tokio::main]
 async fn main() {
     // Build absolute path to `public` so the server works regardless of CWD
@@ -221,6 +238,7 @@ async fn main() {
         .route("/api/generate_quiz", get(generate_quiz))
         .route("/images/:name", get(serve_image))
         .route("/api/submit", post(submit_answer))
+        .route("/api/submit_generated", post(submit_generated))
         .nest_service("/", ServeDir::new(static_dir));
 
     let addr: SocketAddr = env::var("HOST_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string()).parse().unwrap();

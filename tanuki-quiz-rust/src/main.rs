@@ -1,6 +1,8 @@
 use axum::{routing::get, routing::post, Json, Router, extract::Path, response::IntoResponse};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
+use axum::extract::Query;
+use std::collections::HashMap;
 use tower_http::services::ServeDir;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -89,11 +91,10 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     let mut rng = rand::thread_rng();
 
     for (i, (cat_key, keywords)) in categories.iter().enumerate() {
-        // Use Unsplash Source to provide a random image for the keywords without downloading
-        // add a random sig parameter to try to avoid caching the same image
+        // Return proxied URLs so the server can fetch external images and serve them
         let mut rng = rand::thread_rng();
         let sig: u64 = rng.gen();
-        let image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
+        let image_url = format!("/proxy/{}?sig={}", cat_key, sig);
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 
@@ -112,6 +113,42 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
 
     let question = format!("次の画像のうち、{} はどれですか？", label);
     Json(GeneratedQuiz { question, choices, answer_category: target_cat })
+}
+
+async fn proxy_image(Path(key): Path<String>, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    // Map category keys to keywords
+    let mapping: HashMap<&str, &str> = vec![
+        ("tanuki", "tanuki,raccoon dog,狸"),
+        ("anaguma", "badger,anaguma,アナグマ"),
+        ("hakubishin", "masked palm civet,hakubishin,ハクビシン"),
+        ("animal", "animal,wildlife"),
+    ].into_iter().collect();
+
+    let keywords = mapping.get(key.as_str()).copied().unwrap_or("animal,wildlife");
+    let sig = params.get("sig").cloned().unwrap_or_else(|| {
+        let mut r = rand::thread_rng();
+        r.gen::<u64>().to_string()
+    });
+
+    let unsplash_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
+
+    // Fetch image from Unsplash (follow redirects) and return bytes
+    let client = reqwest::Client::new();
+    match client.get(&unsplash_url).send().await {
+        Ok(resp) => match resp.bytes().await {
+            Ok(b) => {
+                let mut headers = axum::http::HeaderMap::new();
+                if let Some(ct) = resp.headers().get(axum::http::header::CONTENT_TYPE) {
+                    headers.insert(axum::http::header::CONTENT_TYPE, ct.clone());
+                } else {
+                    headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/jpeg"));
+                }
+                (axum::http::StatusCode::OK, headers, Bytes::from(b)).into_response()
+            }
+            Err(_) => (axum::http::StatusCode::BAD_GATEWAY).into_response(),
+        },
+        Err(_) => (axum::http::StatusCode::BAD_GATEWAY).into_response(),
+    }
 }
 
 async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {
@@ -238,6 +275,7 @@ async fn main() {
         .route("/api/quiz", get(get_quiz_question))
         .route("/api/generate_quiz", get(generate_quiz))
         .route("/images/:name", get(serve_image))
+        .route("/proxy/:key", get(proxy_image))
         .route("/api/submit", post(submit_answer))
         .route("/api/submit_generated", post(submit_generated))
         .nest_service("/", ServeDir::new(static_dir));

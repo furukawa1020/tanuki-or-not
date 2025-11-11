@@ -22,53 +22,70 @@ struct QuizResult {
     correct_answer: String,
 }
 
-// NOTE: Using placeholders for images.
-// In a real application, you would have a list of actual images.
 fn get_all_questions() -> Vec<QuizQuestion> {
     vec![
+        // たぬき (Tanuki)
         QuizQuestion {
             id: 1,
-            image_url: "https://placehold.jp/3d4070/ffffff/400x300.png?text=たぬき%20(Tanuki)".to_string(),
+            image_url: "https://placehold.co/400x300/FFD700/000000?text=たぬき%20(正面)".to_string(),
             answer: "たぬき".to_string(),
         },
         QuizQuestion {
             id: 2,
-            image_url: "https://placehold.jp/703d40/ffffff/400x300.png?text=アナグマ%20(Anaguma)".to_string(),
-            answer: "アナグマ".to_string(),
-        },
-        QuizQuestion {
-            id: 3,
-            image_url: "https://placehold.jp/40703d/ffffff/400x300.png?text=ハクビシン%20(Hakubishin)".to_string(),
-            answer: "ハクビシン".to_string(),
-        },
-        QuizQuestion {
-            id: 4,
-            image_url: "https://placehold.jp/3d4070/ffffff/400x300.png?text=たぬき%20(別ポーズ)".to_string(),
+            image_url: "https://placehold.co/400x300/FFD700/000000?text=たぬき%20(横向き)".to_string(),
             answer: "たぬき".to_string(),
         },
         QuizQuestion {
+            id: 3,
+            image_url: "https://placehold.co/400x300/FFD700/000000?text=たぬき%20(座る)".to_string(),
+            answer: "たぬき".to_string(),
+        },
+        // アナグマ (Anaguma)
+        QuizQuestion {
+            id: 4,
+            image_url: "https://placehold.co/400x300/A9A9A9/000000?text=アナグマ%20(土を掘る)".to_string(),
+            answer: "アナグマ".to_string(),
+        },
+        QuizQuestion {
             id: 5,
-            image_url: "https://placehold.jp/703d40/ffffff/400x300.png?text=アナグマ%20(別ポーズ)".to_string(),
+            image_url: "https://placehold.co/400x300/A9A9A9/000000?text=アナグマ%20(夜間)".to_string(),
             answer: "アナグマ".to_string(),
         },
         QuizQuestion {
             id: 6,
-            image_url: "https://placehold.jp/40703d/ffffff/400x300.png?text=ハクビシン%20(別ポーズ)".to_string(),
+            image_url: "https://placehold.co/400x300/A9A9A9/000000?text=アナグマ%20(巣穴の近く)".to_string(),
+            answer: "アナグマ".to_string(),
+        },
+        // ハクビシン (Hakubishin)
+        QuizQuestion {
+            id: 7,
+            image_url: "https://placehold.co/400x300/8B4513/FFFFFF?text=ハクビシン%20(木の上)".to_string(),
             answer: "ハクビシン".to_string(),
         },
         QuizQuestion {
-            id: 7,
-            image_url: "https://placehold.jp/3d4070/ffffff/400x300.png?text=たぬき%20(夜行性)".to_string(),
-            answer: "たぬき".to_string(),
-        },
-        QuizQuestion {
             id: 8,
-            image_url: "https://placehold.jp/703d40/ffffff/400x300.png?text=アナグマ%20(土の中)".to_string(),
-            answer: "アナグマ".to_string(),
+            image_url: "https://placehold.co/400x300/8B4513/FFFFFF?text=ハクビシン%20(顔の模様)".to_string(),
+            answer: "ハクビシン".to_string(),
         },
         QuizQuestion {
             id: 9,
-            image_url: "https://placehold.jp/40703d/ffffff/400x300.png?text=ハクビシン%20(木の上)".to_string(),
+            image_url: "https://placehold.co/400x300/8B4513/FFFFFF?text=ハクビシン%20(屋根の上)".to_string(),
+            answer: "ハクビシン".to_string(),
+        },
+        // 追加問題 (Mixed)
+        QuizQuestion {
+            id: 10,
+            image_url: "https://placehold.co/400x300/FFD700/000000?text=たぬき%20(冬毛)".to_string(),
+            answer: "たぬき".to_string(),
+        },
+        QuizQuestion {
+            id: 11,
+            image_url: "https://placehold.co/400x300/A9A9A9/000000?text=アナグマ%20(親子)".to_string(),
+            answer: "アナグマ".to_string(),
+        },
+        QuizQuestion {
+            id: 12,
+            image_url: "https://placehold.co/400x300/8B4513/FFFFFF?text=ハクビシン%20(果物を食べる)".to_string(),
             answer: "ハクビシン".to_string(),
         },
     ]

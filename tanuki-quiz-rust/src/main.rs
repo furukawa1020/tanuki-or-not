@@ -89,10 +89,9 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     let mut rng = rand::thread_rng();
 
     for (i, (cat_key, keywords)) in categories.iter().enumerate() {
-        // Use Unsplash Source to provide a random image for the keywords without downloading
-        // add a random sig parameter to try to avoid caching the same image
-        let sig: u64 = rng.gen();
-        let image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
+        // Serve local generated images so the client always gets something visible.
+        // The handler `/images/:name` will generate a simple PNG for keys like 'tanuki', 'anaguma', 'hakubishin'.
+        let image_url = format!("/images/{}.png", cat_key);
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 

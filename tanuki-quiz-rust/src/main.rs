@@ -135,23 +135,27 @@ async fn proxy_image(Path(key): Path<String>, Query(params): Query<HashMap<Strin
     // Fetch image from Unsplash (follow redirects) and return bytes
     let client = reqwest::Client::new();
     match client.get(&unsplash_url).send().await {
-        Ok(resp) => match resp.bytes().await {
-            Ok(b) => {
-                let mut headers = axum::http::HeaderMap::new();
-                // Convert reqwest header value to axum/http HeaderValue to avoid http-crate version mismatch
-                if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
-                    if let Ok(ct_str) = ct.to_str() {
-                        if let Ok(hv) = axum::http::HeaderValue::from_str(ct_str) {
-                            headers.insert(axum::http::header::CONTENT_TYPE, hv);
+        Ok(resp) => {
+            // clone the content-type header before consuming the response
+            let ct_hdr = resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();
+            match resp.bytes().await {
+                Ok(b) => {
+                    let mut headers = axum::http::HeaderMap::new();
+                    // Convert reqwest header value to axum/http HeaderValue to avoid http-crate version mismatch
+                    if let Some(ct) = ct_hdr {
+                        if let Ok(ct_str) = ct.to_str() {
+                            if let Ok(hv) = axum::http::HeaderValue::from_str(ct_str) {
+                                headers.insert(axum::http::header::CONTENT_TYPE, hv);
+                            }
                         }
                     }
+                    if !headers.contains_key(axum::http::header::CONTENT_TYPE) {
+                        headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/jpeg"));
+                    }
+                    (axum::http::StatusCode::OK, headers, Bytes::from(b)).into_response()
                 }
-                if !headers.contains_key(axum::http::header::CONTENT_TYPE) {
-                    headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/jpeg"));
-                }
-                (axum::http::StatusCode::OK, headers, Bytes::from(b)).into_response()
+                Err(_) => (axum::http::StatusCode::BAD_GATEWAY).into_response(),
             }
-            Err(_) => (axum::http::StatusCode::BAD_GATEWAY).into_response(),
         },
         Err(_) => (axum::http::StatusCode::BAD_GATEWAY).into_response(),
     }

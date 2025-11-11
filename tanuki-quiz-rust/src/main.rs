@@ -38,7 +38,7 @@ fn get_all_questions() -> Vec<QuizQuestion> {
         },
         QuizQuestion {
             id: 3,
-            image_url: "https://placehold.jp/400x300.png?text=ハクビシン？".to_string(),
+            image_url: "https://placehold.jp/400x300.png?text=ハクビシン？",
             answer: "ハクビシン".to_string(),
         },
         // Add more questions as needed

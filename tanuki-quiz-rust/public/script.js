@@ -30,7 +30,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 img.src = choice.image_url;
                 img.alt = '選択肢';
                 img.className = 'choice-image';
-                img.onerror = () => img.style.opacity = '0.4';
+                // If external image fails (CDN/Heroku/Unsplash error), fall back to local server-generated image.
+                img.onerror = () => {
+                    try {
+                        img.src = `/images/${choice.category}.png`;
+                    } catch (e) {
+                        img.style.opacity = '0.4';
+                    }
+                };
                 wrapper.appendChild(img);
 
                 const btn = document.createElement('button');

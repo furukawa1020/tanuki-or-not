@@ -9,9 +9,7 @@ use image::{ImageBuffer, Rgba, DynamicImage, ImageOutputFormat};
 use std::io::Cursor;
 use bytes::Bytes;
 use axum::http::header;
-use reqwest::Client;
 use tokio::fs;
-use rand::Rng;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -64,6 +62,7 @@ struct GeneratedChoice {
 struct GeneratedQuiz {
     question: String,
     choices: Vec<GeneratedChoice>,
+    answer_category: String,
 }
 
 async fn generate_quiz() -> Json<GeneratedQuiz> {
@@ -73,25 +72,15 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     fetched_dir.push("fetched");
     let _ = fs::create_dir_all(&fetched_dir).await;
 
-    let client = Client::new();
     let mut choices: Vec<GeneratedChoice> = Vec::new();
 
-    // Define categories and corresponding search keywords for the image source
-    let categories = vec![
-        ("forest", "forest,trees"),
-        ("water", "ocean,sea,water"),
-        ("urban", "city,street,building"),
-        ("animal", "animal,wildlife"),
-    ];
+    // Define categories (these are used as keys to generate images)
+    let categories = vec!["forest", "water", "urban", "animal"];
 
-    // For each category, fetch one image using Unsplash's source endpoint (no API key required)
-    for (i, (cat_key, keyword)) in categories.iter().enumerate() {
-        let src_url = format!("https://source.unsplash.com/800x600/?{}", keyword);
-        let resp = client.get(&src_url).send().await;
-        if resp.is_err() {
-            continue;
-        }
-        let bytes = match resp.unwrap().bytes().await {
+    // For each category, generate one image using the internal generator and save it under public/fetched/{category}
+    for (i, cat_key) in categories.iter().enumerate() {
+        let key = format!("{}{}", cat_key, i + 1);
+        let bytes = match generate_image_bytes(&key) {
             Ok(b) => b,
             Err(_) => continue,
         };
@@ -102,25 +91,25 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
         out_dir.push("fetched");
         out_dir.push(cat_key);
         let _ = fs::create_dir_all(&out_dir).await;
-        let filename = format!("img_{}.jpg", i+1);
+        let filename = format!("img_{}.png", i + 1);
         let mut out_path = out_dir.clone();
         out_path.push(&filename);
         let _ = fs::write(&out_path, &bytes).await;
 
-    // make URL relative to `public/` so ServeDir serves it at `/fetched/...`
-    let public_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("public");
-    let rel_path = if let Ok(rp) = out_path.strip_prefix(&public_dir) { rp.to_path_buf() } else { out_path.clone() };
-    // normalize Windows backslashes to URL slashes
-    let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
+        // make URL relative to `public/` so ServeDir serves it at `/fetched/...`
+        let public_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("public");
+        let rel_path = if let Ok(rp) = out_path.strip_prefix(&public_dir) { rp.to_path_buf() } else { out_path.clone() };
+        // normalize Windows backslashes to URL slashes
+        let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
 
-        choices.push(GeneratedChoice { id: i+1, image_url, category: cat_key.to_string() });
+        choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 
     // Shuffle the choices so order isn't predictable
     let mut rng = rand::thread_rng();
     choices.shuffle(&mut rng);
 
-    // Pick a target category randomly from one of the fetched choices
+    // Pick a target category randomly from one of the generated choices
     let target_cat = if let Some(c) = choices.choose(&mut rng) { c.category.clone() } else { "other".to_string() };
     let label = match target_cat.as_str() {
         "forest" => "森",
@@ -131,7 +120,7 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     };
 
     let question = format!("次の画像のうち、{} はどれですか？", label);
-    Json(GeneratedQuiz { question, choices })
+    Json(GeneratedQuiz { question, choices, answer_category: target_cat })
 }
 
 async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {

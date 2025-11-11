@@ -33,13 +33,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error("Failed to load question:", error);
-            console.log("resultText in catch block:", resultText);
-            resultText.textContent = "クイズの読み込みに失敗しました。";
+            if (resultText) {
+                resultText.textContent = "クイズの読み込みに失敗しました。";
+            } else {
+                console.error("Error: resultText element not found.");
+            }
         }
     }
 
     async function submitAnswer(selectedAnswer) {
         if (!currentQuestion) return;
+
+        console.log("Selected answer:", selectedAnswer);
+        console.log("Current question ID:", currentQuestion.id);
 
         try {
             const response = await fetch('/api/submit', {
@@ -56,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const result = await response.json();
+            console.log("Result from backend:", result);
 
             if (result.correct) {
                 resultText.textContent = "正解！";

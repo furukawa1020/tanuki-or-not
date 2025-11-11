@@ -77,6 +77,9 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     // Define categories (these are used as keys to generate images)
     let categories = vec!["forest", "water", "urban", "animal"];
 
+    // base URL for constructing absolute image URLs (can be overridden with BASE_URL env var)
+    let base_url = env::var("BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
     // For each category, generate one image using the internal generator and save it under public/fetched/{category}
     for (i, cat_key) in categories.iter().enumerate() {
         let key = format!("{}{}", cat_key, i + 1);
@@ -91,6 +94,12 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
         out_dir.push("fetched");
         out_dir.push(cat_key);
         let _ = fs::create_dir_all(&out_dir).await;
+        // remove existing files in this category to keep things tidy
+        if let Ok(mut entries) = fs::read_dir(&out_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let _ = fs::remove_file(entry.path()).await;
+            }
+        }
         let filename = format!("img_{}.png", i + 1);
         let mut out_path = out_dir.clone();
         out_path.push(&filename);
@@ -100,7 +109,8 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
         let public_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("public");
         let rel_path = if let Ok(rp) = out_path.strip_prefix(&public_dir) { rp.to_path_buf() } else { out_path.clone() };
         // normalize Windows backslashes to URL slashes
-        let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
+        let image_url_path = format!("/{}", rel_path.to_string_lossy().replace("\\","/"));
+        let image_url = format!("{}{}", base_url.trim_end_matches('/'), image_url_path);
 
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
@@ -242,11 +252,10 @@ async fn main() {
         .route("/api/submit", post(submit_answer))
         .nest_service("/", ServeDir::new(static_dir));
 
-    let addr: SocketAddr = "0.0.0.0:3000".parse().unwrap();
+    let addr: SocketAddr = env::var("HOST_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string()).parse().unwrap();
     println!("listening on http://{}", addr);
 
     // Use axum's serve helper with a TcpListener
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    println!("listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 }

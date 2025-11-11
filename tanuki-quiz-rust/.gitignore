@@ -1,0 +1,13 @@
+# Ignore Rust build artifacts
+/target/
+
+# Ignore IDE/editor files
+.vscode/
+.DS_Store
+
+# Ignore temporary files
+*.log
+*.tmp
+
+# Ignore debug symbol pdb files
+**/*.pdb

@@ -2,7 +2,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const quizImage = document.getElementById('quiz-image');
     const optionsContainer = document.getElementById('options');
-    const resultText = document.getElementById('result');
+    const resultText = document.getElementById('result-message');
     const shareContainer = document.getElementById('share-container');
     const shareButton = document.getElementById('share-button');
 
@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error("Failed to load question:", error);
+            console.log("resultText in catch block:", resultText);
             resultText.textContent = "クイズの読み込みに失敗しました。";
         }
     }

@@ -1,124 +1,85 @@
 
 document.addEventListener('DOMContentLoaded', () => {
-    const quizImage = document.getElementById('quiz-image');
-    console.log('quizImage:', quizImage);
+    const questionEl = document.querySelector('#quiz-container h1') || document.querySelector('.container h1');
+    const questionText = document.getElementById('result-message');
     const optionsContainer = document.getElementById('options');
-    console.log('optionsContainer:', optionsContainer);
-    const resultText = document.getElementById('result-message');
-    console.log('resultText:', resultText);
     const shareContainer = document.getElementById('share-container');
-    console.log('shareContainer:', shareContainer);
     const shareButton = document.getElementById('share-button');
-    console.log('shareButton:', shareButton);
 
-    let currentQuestion = null;
+    let currentQuiz = null;
 
-    const animals = ["たぬき", "アナグマ", "ハクビシン"];
-
-    async function loadQuestion() {
+    async function loadGeneratedQuiz() {
         try {
-            const response = await fetch('/api/quiz');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            currentQuestion = await response.json();
-            
-            if (!currentQuestion || !currentQuestion.image_url) {
-                console.error("Received invalid question data:", currentQuestion);
-                resultText.textContent = "エラー: 無効なクイズデータを受信しました。";
-                return;
-            }
+            const res = await fetch('/api/generate_quiz');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            currentQuiz = data;
 
-            quizImage.src = currentQuestion.image_url;
-            quizImage.onerror = () => {
-                console.error("Failed to load image:", currentQuestion.image_url);
-                resultText.textContent = "エラー: 画像の読み込みに失敗しました。";
-            };
-            resultText.textContent = '';
-            shareContainer.style.display = 'none';
+            // display question
+            if (questionEl) questionEl.textContent = 'たぬき？クイズ';
+            questionText.textContent = data.question || '';
+
+            // render choices as images
             optionsContainer.innerHTML = '';
+            shareContainer.style.display = 'none';
 
-            animals.forEach(animal => {
-                const button = document.createElement('button');
-                button.textContent = animal;
-                button.className = 'option-button';
-                button.onclick = () => submitAnswer(animal);
-                optionsContainer.appendChild(button);
+            data.choices.forEach(choice => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'choice-item';
+                const img = document.createElement('img');
+                img.src = choice.image_url;
+                img.alt = '選択肢';
+                img.className = 'choice-image';
+                img.onerror = () => img.style.opacity = '0.4';
+                wrapper.appendChild(img);
+
+                const btn = document.createElement('button');
+                btn.textContent = 'これだ！';
+                btn.className = 'option-button';
+                btn.onclick = () => checkAnswer(choice);
+                wrapper.appendChild(btn);
+
+                optionsContainer.appendChild(wrapper);
             });
 
-        } catch (error) {
-            console.error("Failed to load question:", error);
-            if (resultText) {
-                resultText.textContent = "クイズの読み込みに失敗しました。";
-            } else {
-                console.error("Error: resultText element not found.");
-            }
+        } catch (err) {
+            console.error('failed to load generated quiz', err);
+            questionText.textContent = 'クイズの読み込みに失敗しました。';
         }
     }
 
-    async function submitAnswer(selectedAnswer) {
-        if (!currentQuestion) return;
-
-        console.log("Selected answer:", selectedAnswer);
-        console.log("Current question ID:", currentQuestion.id);
-
-        try {
-            const response = await fetch('/api/submit', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    id: currentQuestion.id,
-                    answer: selectedAnswer,
-                }),
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const result = await response.json();
-            console.log("Result from backend:", result);
-
-            if (result.correct) {
-                resultText.textContent = "正解！";
-            } else {
-                resultText.textContent = `残念！正解は ${result.correct_answer} でした。`;
-            }
-            
-            // Disable buttons after answering
-            const buttons = optionsContainer.getElementsByTagName('button');
-            for(let button of buttons) {
-                button.disabled = true;
-            }
-
-            setupShareButton(result.correct);
-            shareContainer.style.display = 'block';
-
-            // Add a button to load the next question
-            const nextButton = document.createElement('button');
-            nextButton.textContent = '次の問題へ';
-            nextButton.className = 'option-button'; // Reuse style
-            nextButton.style.gridColumn = '1 / -1'; // Span all columns
-            nextButton.style.marginTop = '1rem';
-            nextButton.onclick = loadQuestion;
-            optionsContainer.appendChild(nextButton);
-
-
-        } catch (error) {
-            console.error("Failed to submit answer:", error);
-            resultText.textContent = "回答の送信に失敗しました。";
+    function checkAnswer(choice) {
+        if (!currentQuiz) return;
+        const correct = choice.category === currentQuiz.answer_category;
+        if (correct) {
+            questionText.textContent = '正解！おめでとう🎉';
+        } else {
+            questionText.textContent = `残念！正解は「${currentQuiz.answer_category}」でした。`;
         }
+
+        // disable all buttons
+        const buttons = optionsContainer.getElementsByTagName('button');
+        for (let b of buttons) b.disabled = true;
+
+        setupShareButton(correct);
+        shareContainer.style.display = 'block';
+
+        // add next question button
+        const next = document.createElement('button');
+        next.textContent = '次の問題へ';
+        next.className = 'option-button';
+        next.style.gridColumn = '1 / -1';
+        next.style.marginTop = '1rem';
+        next.onclick = loadGeneratedQuiz;
+        optionsContainer.appendChild(next);
     }
 
     function setupShareButton(correct) {
-        const text = correct 
-            ? `たぬきクイズで正解しました！あなたも見分けられるかな？`
-            : `たぬきクイズに挑戦しました！あなたも見分けられるかな？`;
+        const text = correct ? 'たぬきクイズで正解しました！' : 'たぬきクイズに挑戦しました！';
         const url = window.location.href;
-        const hashtags = "たぬきクイズ";
-        const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=${encodeURIComponent(hashtags)}`;
+        const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
         shareButton.href = shareUrl;
     }
 
-    loadQuestion();
+    loadGeneratedQuiz();
 });

@@ -75,13 +75,19 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
 
     let client = Client::new();
     let mut choices: Vec<GeneratedChoice> = Vec::new();
-    let mut rng = rand::thread_rng();
 
-    // fetch 4 images
-    for i in 0..4usize {
-        let seed: u64 = rng.gen();
-        let url = format!("https://picsum.photos/seed/{}/800/600", seed);
-        let resp = client.get(&url).send().await;
+    // Define categories and corresponding search keywords for the image source
+    let categories = vec![
+        ("forest", "forest,trees"),
+        ("water", "ocean,sea,water"),
+        ("urban", "city,street,building"),
+        ("animal", "animal,wildlife"),
+    ];
+
+    // For each category, fetch one image using Unsplash's source endpoint (no API key required)
+    for (i, (cat_key, keyword)) in categories.iter().enumerate() {
+        let src_url = format!("https://source.unsplash.com/800x600/?{}", keyword);
+        let resp = client.get(&src_url).send().await;
         if resp.is_err() {
             continue;
         }
@@ -90,67 +96,34 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
             Err(_) => continue,
         };
 
-        let filename = format!("fetched/img_{}.jpg", seed);
-        let mut out_path = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        out_path.push("public");
+        // save under public/fetched/{category}
+        let mut out_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        out_dir.push("public");
+        out_dir.push("fetched");
+        out_dir.push(cat_key);
+        let _ = fs::create_dir_all(&out_dir).await;
+        let filename = format!("img_{}.jpg", i+1);
+        let mut out_path = out_dir.clone();
         out_path.push(&filename);
-        // write file
         let _ = fs::write(&out_path, &bytes).await;
 
-        // analyze image: average color
-        let dyn = match image::load_from_memory(&bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let thumb = dyn.thumbnail(80, 60);
-        let (w, h) = thumb.dimensions();
-        let mut r_sum: u64 = 0;
-        let mut g_sum: u64 = 0;
-        let mut b_sum: u64 = 0;
-        let mut cnt: u64 = 0;
-        for px in thumb.pixels() {
-            let p = px.2.to_rgb();
-            r_sum += p[0] as u64;
-            g_sum += p[1] as u64;
-            b_sum += p[2] as u64;
-            cnt += 1;
-        }
-        if cnt == 0 { continue; }
-        let r_avg = (r_sum / cnt) as u8;
-        let g_avg = (g_sum / cnt) as u8;
-        let b_avg = (b_sum / cnt) as u8;
+        let rel_path = out_path.strip_prefix(env::current_dir().unwrap_or_else(|_| PathBuf::from("."))).unwrap_or(&out_path);
+        let image_url = format!("/{}", rel_path.to_string_lossy().replace("\\\\","/"));
 
-        let category = if g_avg > r_avg && g_avg > b_avg && g_avg > 100 {
-            "forest"
-        } else if b_avg > r_avg && b_avg > g_avg && b_avg > 100 {
-            "water"
-        } else if r_avg > g_avg && r_avg > b_avg && r_avg > 100 {
-            "warm"
-        } else {
-            "other"
-        };
-
-        let id = i + 1;
-        let image_url = format!("/{}", filename.replace("\\\\","/"));
-        choices.push(GeneratedChoice { id, image_url, category: category.to_string() });
+        choices.push(GeneratedChoice { id: i+1, image_url, category: cat_key.to_string() });
     }
 
-    // pick target category (prefer non-other)
-    let mut target_cat = "other".to_string();
-    for c in &choices {
-        if c.category != "other" {
-            target_cat = c.category.clone();
-            break;
-        }
-    }
-    if target_cat == "other" && !choices.is_empty() {
-        target_cat = choices[0].category.clone();
-    }
+    // Shuffle the choices so order isn't predictable
+    let mut rng = rand::thread_rng();
+    choices.shuffle(&mut rng);
 
+    // Pick a target category randomly from one of the fetched choices
+    let target_cat = if let Some(c) = choices.choose(&mut rng) { c.category.clone() } else { "other".to_string() };
     let label = match target_cat.as_str() {
         "forest" => "森",
         "water" => "海/空",
-        "warm" => "赤みのある景色",
+        "urban" => "街並み/都市",
+        "animal" => "動物",
         _ => "特徴のある画像",
     };
 

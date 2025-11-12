@@ -563,11 +563,31 @@ async fn admin_delete(Query(q): Query<StdHashMap<String, String>>, Json(payload)
     let assets_dir = PathBuf::from("public").join("assets");
     let target = assets_dir.join(&payload.filename);
     let thumb = assets_dir.join("thumbs").join(&payload.filename);
-    let mut ok = false;
-    if target.exists() { let _ = std::fs::remove_file(&target); ok = true; }
-    if thumb.exists() { let _ = std::fs::remove_file(&thumb); }
-    if ok {
-        Json(AdminUploadResult { ok: true, saved_filename: Some(payload.filename), thumb_filename: None, message: None })
+    // record whether files existed before removal
+    let target_existed = target.exists();
+    let thumb_existed = thumb.exists();
+    if target_existed {
+        let _ = std::fs::remove_file(&target);
+    }
+    if thumb_existed {
+        let _ = std::fs::remove_file(&thumb);
+    }
+
+    if target_existed {
+        // update index.json to remove any entry for this filename
+        let mut idx = load_index();
+        let before = idx.len();
+        idx.retain(|e| e.filename != payload.filename);
+        if idx.len() != before {
+            save_index(&idx);
+        }
+
+        Json(AdminUploadResult {
+            ok: true,
+            saved_filename: Some(payload.filename.clone()),
+            thumb_filename: if thumb_existed { Some(payload.filename.clone()) } else { None },
+            message: None,
+        })
     } else {
         Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("not found".to_string()) })
     }

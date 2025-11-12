@@ -378,6 +378,7 @@ async fn main() {
     .route("/images/:name", get(serve_image))
         .route("/api/submit", post(submit_answer))
         .route("/api/submit_generated", post(submit_generated))
+        .route("/api/admin/upload", post(admin_upload_json))
         .nest_service("/", ServeDir::new(static_dir));
 
     let addr: SocketAddr = env::var("HOST_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string()).parse().unwrap();

@@ -1,4 +1,5 @@
 use axum::{routing::get, routing::post, Json, Router, extract::Path, response::IntoResponse};
+use axum::http::HeaderMap;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 // proxy removed: we no longer fetch Unsplash from server side to keep builds light
@@ -162,9 +163,43 @@ fn hamming_hex(a_hex: &str, b_hex: &str) -> Option<u32> {
     Some((a ^ b).count_ones())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::DynamicImage;
+    use image::RgbaImage;
+
+    #[test]
+    fn test_ahash_and_hamming_same_image() {
+        // create a small solid image
+        let mut im = RgbaImage::new(16, 16);
+        for p in im.pixels_mut() { *p = image::Rgba([200, 180, 160, 255]); }
+        let di = DynamicImage::ImageRgba8(im.clone());
+        let h1 = compute_ahash(&di);
+        let h2 = compute_ahash(&di);
+        assert_eq!(h1, h2);
+        let dist = hamming_hex(&h1, &h2).unwrap();
+        assert_eq!(dist, 0);
+    }
+
+    #[test]
+    fn test_ahash_and_hamming_different_images() {
+        let mut a = RgbaImage::new(16, 16);
+        for p in a.pixels_mut() { *p = image::Rgba([10, 10, 10, 255]); }
+        let mut b = RgbaImage::new(16, 16);
+        for p in b.pixels_mut() { *p = image::Rgba([240, 240, 240, 255]); }
+        let ha = compute_ahash(&DynamicImage::ImageRgba8(a));
+        let hb = compute_ahash(&DynamicImage::ImageRgba8(b));
+        let dist = hamming_hex(&ha, &hb).unwrap();
+        assert!(dist > 0);
+    }
+}
+
 // similar search endpoint: ?filename=<name>&token=<token>&max_hamming=10
-async fn admin_similar(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
-    let token = q.get("token").cloned().unwrap_or_default();
+async fn admin_similar(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
+    // prefer Authorization: Bearer <token> header, fallback to ?token=
+    let header_token = token_from_headers(&headers);
+    let token = header_token.or_else(|| q.get("token").cloned()).unwrap_or_default();
     if !check_admin_token_token(&token) { return Json(vec![]); }
     let filename = match q.get("filename") { Some(s) => s.clone(), None => return Json(vec![]) };
     let max_hamming: u32 = q.get("max_hamming").and_then(|s| s.parse().ok()).unwrap_or(10);
@@ -257,7 +292,12 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
 }
 
 // simple admin upload via JSON { filename, b64 }
-async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
+async fn admin_upload_json(headers: HeaderMap, Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
+    // require Authorization header (or accept ?token not available for JSON endpoint)
+    let header_token = token_from_headers(&headers);
+    if header_token.is_none() {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized: missing Authorization header".to_string()) });
+    }
     // sanitize filename: keep ascii alnum, dash, underscore and extension
     let name = payload.filename.clone();
     if name.contains('/') || name.contains('\\') {
@@ -325,9 +365,10 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
 }
 
 // multipart upload handler (form submit)
-async fn admin_upload_multipart(Query(q): Query<StdHashMap<String, String>>, mut multipart: Multipart) -> Json<AdminUploadResult> {
-    // auth via query ?token=
-    let token = q.get("token").cloned().unwrap_or_default();
+async fn admin_upload_multipart(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>, mut multipart: Multipart) -> Json<AdminUploadResult> {
+    // prefer Authorization header, fallback to query ?token=
+    let header_token = token_from_headers(&headers);
+    let token = header_token.or_else(|| q.get("token").cloned()).unwrap_or_default();
     if !check_admin_token_token(&token) {
         return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
     }
@@ -393,6 +434,18 @@ async fn admin_upload_multipart(Query(q): Query<StdHashMap<String, String>>, mut
 fn check_admin_token_token(token: &str) -> bool {
     let expected = env::var("ADMIN_TOKEN").unwrap_or_else(|_| "admin-token".to_string());
     token == expected
+}
+
+fn token_from_headers(headers: &HeaderMap) -> Option<String> {
+    if let Some(v) = headers.get("authorization") {
+        if let Ok(s) = v.to_str() {
+            let s = s.trim();
+            if s.to_lowercase().starts_with("bearer ") {
+                return Some(s[7..].trim().to_string());
+            }
+        }
+    }
+    None
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
@@ -527,8 +580,9 @@ struct AdminListEntry {
     thumb: bool,
 }
 
-async fn admin_list(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
-    let token = q.get("token").cloned().unwrap_or_default();
+async fn admin_list(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
+    let header_token = token_from_headers(&headers);
+    let token = header_token.or_else(|| q.get("token").cloned()).unwrap_or_default();
     if !check_admin_token_token(&token) { return Json(vec![]); }
     let assets_dir = PathBuf::from("public").join("assets");
     let mut out = Vec::new();
@@ -557,8 +611,9 @@ async fn admin_list(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<Adm
 #[derive(Deserialize)]
 struct AdminDeleteReq { filename: String }
 
-async fn admin_delete(Query(q): Query<StdHashMap<String, String>>, Json(payload): Json<AdminDeleteReq>) -> Json<AdminUploadResult> {
-    let token = q.get("token").cloned().unwrap_or_default();
+async fn admin_delete(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>, Json(payload): Json<AdminDeleteReq>) -> Json<AdminUploadResult> {
+    let header_token = token_from_headers(&headers);
+    let token = header_token.or_else(|| q.get("token").cloned()).unwrap_or_default();
     if !check_admin_token_token(&token) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) }); }
     let assets_dir = PathBuf::from("public").join("assets");
     let target = assets_dir.join(&payload.filename);

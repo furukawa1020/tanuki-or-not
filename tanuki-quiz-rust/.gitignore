@@ -11,3 +11,5 @@
 
 # Ignore debug symbol pdb files
 **/*.pdb
+
+public/assets/

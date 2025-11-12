@@ -24,6 +24,9 @@ use std::collections::HashMap as StdHashMap;
 // image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
+use std::time::SystemTime;
+use serde_json::Value as JsonValue;
+use std::io::Read;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -109,6 +112,56 @@ struct AdminUploadResult {
     saved_filename: Option<String>,
     thumb_filename: Option<String>,
     message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AssetIndexEntry {
+    filename: String,
+    size: u64,
+    thumb: bool,
+    phash: Option<String>,
+    uploaded_at: String,
+}
+
+fn index_path() -> PathBuf { PathBuf::from("public").join("assets").join("index.json") }
+
+fn load_index() -> Vec<AssetIndexEntry> {
+    let p = index_path();
+    if !p.exists() { return vec![]; }
+    let mut s = String::new();
+    if let Ok(mut f) = File::open(&p) {
+        if f.read_to_string(&mut s).is_ok() {
+            if let Ok(v) = serde_json::from_str::<Vec<AssetIndexEntry>>(&s) { return v; }
+        }
+    }
+    vec![]
+}
+
+fn save_index(entries: &Vec<AssetIndexEntry>) {
+    let p = index_path();
+    if let Ok(mut f) = File::create(&p) {
+        let _ = f.write_all(serde_json::to_string_pretty(entries).unwrap_or_else(|_| "[]".to_string()).as_bytes());
+    }
+}
+
+fn compute_ahash(dyn: &DynamicImage) -> String {
+    // average hash (8x8 -> 64 bits)
+    let small = dyn.resize_exact(8, 8, image::imageops::FilterType::Nearest).to_luma8();
+    let mut sum: u32 = 0;
+    for p in small.pixels() { sum += p[0] as u32; }
+    let avg = (sum / 64) as u8;
+    let mut bits: u64 = 0;
+    for (i, p) in small.pixels().enumerate() {
+        if p[0] >= avg { bits |= 1u64 << i; }
+    }
+    format!("{:016x}", bits)
+}
+
+fn hamming_hex(a_hex: &str, b_hex: &str) -> Option<u32> {
+    if a_hex.len() != 16 || b_hex.len() != 16 { return None; }
+    let a = u64::from_str_radix(a_hex, 16).ok()?;
+    let b = u64::from_str_radix(b_hex, 16).ok()?;
+    Some((a ^ b).count_ones())
 }
 
 async fn generate_quiz() -> Json<GeneratedQuizResponse> {

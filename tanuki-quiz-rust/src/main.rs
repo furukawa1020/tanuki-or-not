@@ -162,6 +162,26 @@ fn hamming_hex(a_hex: &str, b_hex: &str) -> Option<u32> {
     Some((a ^ b).count_ones())
 }
 
+// similar search endpoint: ?filename=<name>&token=<token>&max_hamming=10
+async fn admin_similar(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
+    let token = q.get("token").cloned().unwrap_or_default();
+    if !check_admin_token_token(&token) { return Json(vec![]); }
+    let filename = match q.get("filename") { Some(s) => s.clone(), None => return Json(vec![]) };
+    let max_hamming: u32 = q.get("max_hamming").and_then(|s| s.parse().ok()).unwrap_or(10);
+    let idx = load_index();
+    let base = match idx.iter().find(|e| e.filename == filename) { Some(e) => e.phash.clone().unwrap_or_default(), None => return Json(vec![]) };
+    let mut out = Vec::new();
+    for e in idx.iter() {
+        if e.filename == filename { continue; }
+        if let (Some(a), Some(b)) = (Some(base.as_str()), e.phash.as_deref()) {
+            if let Some(dist) = hamming_hex(a, b) {
+                if dist <= max_hamming { out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb }); }
+            }
+        }
+    }
+    Json(out)
+}
+
 async fn generate_quiz() -> Json<GeneratedQuizResponse> {
     // Use free image source URLs (no download). We'll return external URLs that the client can load directly.
     let mut choices: Vec<GeneratedChoice> = Vec::new();
@@ -314,7 +334,7 @@ async fn admin_upload_multipart(Query(q): Query<StdHashMap<String, String>>, mut
 
     // find first file field
     while let Some(field) = multipart.next_field().await.unwrap_or(None) {
-        let name = field.name().map(|s| s.to_string()).unwrap_or_else(|| "file".to_string());
+    let _name = field.name().map(|s| s.to_string()).unwrap_or_else(|| "file".to_string());
         if field.file_name().is_none() { continue; }
         let filename = field.file_name().unwrap().to_string();
         // sanitize
@@ -569,6 +589,7 @@ async fn main() {
         .route("/api/admin/upload", post(admin_upload_json))
         .route("/api/admin/upload_multipart", post(admin_upload_multipart))
         .route("/api/admin/list", get(admin_list))
+    .route("/api/admin/similar", get(admin_similar))
         .route("/api/admin/delete", post(admin_delete))
         .nest_service("/", ServeDir::new(static_dir));
 

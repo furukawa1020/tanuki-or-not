@@ -24,8 +24,6 @@ use std::collections::HashMap as StdHashMap;
 // image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
-use std::time::SystemTime;
-use serde_json::Value as JsonValue;
 use std::io::Read;
 
 #[derive(Serialize, Clone)]
@@ -144,9 +142,9 @@ fn save_index(entries: &Vec<AssetIndexEntry>) {
     }
 }
 
-fn compute_ahash(dyn: &DynamicImage) -> String {
+fn compute_ahash(img: &DynamicImage) -> String {
     // average hash (8x8 -> 64 bits)
-    let small = dyn.resize_exact(8, 8, image::imageops::FilterType::Nearest).to_luma8();
+    let small = img.resize_exact(8, 8, image::imageops::FilterType::Nearest).to_luma8();
     let mut sum: u32 = 0;
     for p in small.pixels() { sum += p[0] as u32; }
     let avg = (sum / 64) as u8;

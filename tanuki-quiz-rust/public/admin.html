@@ -88,7 +88,7 @@
       const fd = new FormData();
       fd.append('file', currentFile, name);
       try {
-        const res = await fetch('/api/admin/upload_multipart', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+          const res = await fetch('/api/admin/upload_multipart?token=' + encodeURIComponent(token), { method: 'POST', body: fd });
         const j = await res.json();
         if (j.ok) { result.innerHTML = `<div class="ok">multipart アップロード成功: ${j.saved_filename}</div>`; await refreshList(); } else { result.innerHTML = `<div class="err">失敗: ${j.message||'unknown'}</div>`; }
       } catch (e) { result.innerHTML = `<div class="err">ネットワークエラー: ${e}</div>`; }
@@ -97,7 +97,7 @@
     async function refreshList() {
       const token = document.getElementById('admintoken').value || '';
       try {
-        const res = await fetch('/api/admin/list', { headers: { 'Authorization': 'Bearer ' + token } });
+  const res = await fetch('/api/admin/list?token=' + encodeURIComponent(token));
         const arr = await res.json();
         const container = document.getElementById('list');
         if (!Array.isArray(arr)) { container.innerHTML = '認証に失敗しました'; return; }
@@ -111,7 +111,7 @@
           del.textContent = '削除';
           del.onclick = async () => {
             if (!confirm('削除しますか？')) return;
-            const r = await fetch('/api/admin/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ filename: item.filename }) });
+            const r = await fetch('/api/admin/delete?token=' + encodeURIComponent(token), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: item.filename }) });
             const jr = await r.json(); if (jr.ok) { await refreshList(); } else { alert('削除失敗: ' + (jr.message||'')); }
           };
           d.appendChild(del);

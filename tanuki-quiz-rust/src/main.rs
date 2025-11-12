@@ -19,9 +19,8 @@ use uuid::Uuid;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use axum::extract::Multipart;
-use axum::http::HeaderMap;
-use axum::extract::Extension;
-use tokio::io::AsyncReadExt;
+use axum::extract::Query;
+use std::collections::HashMap as StdHashMap;
 // image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
@@ -246,9 +245,10 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
 }
 
 // multipart upload handler (form submit)
-async fn admin_upload_multipart(mut multipart: Multipart, headers: HeaderMap) -> Json<AdminUploadResult> {
-    // auth
-    if !check_admin_token(&headers) {
+async fn admin_upload_multipart(Query(q): Query<StdHashMap<String, String>>, mut multipart: Multipart) -> Json<AdminUploadResult> {
+    // auth via query ?token=
+    let token = q.get("token").cloned().unwrap_or_default();
+    if !check_admin_token_token(&token) {
         return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
     }
 
@@ -301,14 +301,9 @@ async fn admin_upload_multipart(mut multipart: Multipart, headers: HeaderMap) ->
     Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("no file field found".to_string()) })
 }
 
-fn check_admin_token(headers: &HeaderMap) -> bool {
+fn check_admin_token_token(token: &str) -> bool {
     let expected = env::var("ADMIN_TOKEN").unwrap_or_else(|_| "admin-token".to_string());
-    // check Authorization: Bearer <token> or x-admin-token
-    if let Some(v) = headers.get("authorization") {
-        if let Ok(s) = v.to_str() { if s.starts_with("Bearer ") && s[7..] == expected { return true; } }
-    }
-    if let Some(v) = headers.get("x-admin-token") { if let Ok(s) = v.to_str() { if s == expected { return true; } } }
-    false
+    token == expected
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
@@ -443,10 +438,9 @@ struct AdminListEntry {
     thumb: bool,
 }
 
-async fn admin_list(headers: HeaderMap) -> Json<Vec<AdminListEntry>> {
-    if !check_admin_token(&headers) {
-        return Json(vec![]);
-    }
+async fn admin_list(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
+    let token = q.get("token").cloned().unwrap_or_default();
+    if !check_admin_token_token(&token) { return Json(vec![]); }
     let assets_dir = PathBuf::from("public").join("assets");
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&assets_dir) {
@@ -466,10 +460,9 @@ async fn admin_list(headers: HeaderMap) -> Json<Vec<AdminListEntry>> {
 #[derive(Deserialize)]
 struct AdminDeleteReq { filename: String }
 
-async fn admin_delete(Json(payload): Json<AdminDeleteReq>, headers: HeaderMap) -> Json<AdminUploadResult> {
-    if !check_admin_token(&headers) {
-        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
-    }
+async fn admin_delete(Query(q): Query<StdHashMap<String, String>>, Json(payload): Json<AdminDeleteReq>) -> Json<AdminUploadResult> {
+    let token = q.get("token").cloned().unwrap_or_default();
+    if !check_admin_token_token(&token) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) }); }
     let assets_dir = PathBuf::from("public").join("assets");
     let target = assets_dir.join(&payload.filename);
     let thumb = assets_dir.join("thumbs").join(&payload.filename);

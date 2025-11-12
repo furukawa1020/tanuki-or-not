@@ -185,7 +185,7 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
 // simple admin upload via JSON { filename, b64 }
 async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
     // sanitize filename: keep ascii alnum, dash, underscore and extension
-    let mut name = payload.filename.clone();
+    let name = payload.filename.clone();
     if name.contains('/') || name.contains('\\') {
         return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("invalid filename".to_string()) });
     }
@@ -216,9 +216,10 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
     let mut target = assets_dir.join(&safe);
     let mut counter = 1;
     while target.exists() {
-        // insert suffix before extension
-        let stem = PathBuf::from(&safe).file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-        let ext = PathBuf::from(&safe).extension().and_then(|s| s.to_str()).unwrap_or("");
+    // insert suffix before extension
+    let tmp = PathBuf::from(&safe);
+    let stem = tmp.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = tmp.extension().and_then(|s| s.to_str()).unwrap_or("");
         let newname = if ext.is_empty() { format!("{}-{}", stem, counter) } else { format!("{}-{}.{}", stem, counter, ext) };
         target = assets_dir.join(&newname);
         counter += 1;

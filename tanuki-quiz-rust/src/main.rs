@@ -83,15 +83,26 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     let mut rng = rand::thread_rng();
     for (i, cat_key) in categories.iter().enumerate() {
         let mut image_url = String::new();
-        // try local files
-        for n in 1..=3 {
-            let fname = format!("{}{}.jpg", cat_key, n);
-            let fpath = static_dir.join(&fname);
-            if fpath.exists() {
-                image_url = format!("/assets/{}", fname);
-                break;
+        // look for any matching local files in public/assets (support any number)
+        if static_dir.exists() {
+            let mut candidates: Vec<String> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&static_dir) {
+                for entry in entries.flatten() {
+                    if let Some(name_os) = entry.file_name().to_str() {
+                        let name = name_os.to_string();
+                        let lower = name.to_lowercase();
+                        if lower.starts_with(&cat_key.to_string()) && (lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".png")) {
+                            candidates.push(name);
+                        }
+                    }
+                }
+            }
+            if !candidates.is_empty() {
+                let picked = candidates.choose(&mut rng).unwrap().clone();
+                image_url = format!("/assets/{}", picked);
             }
         }
+
         // if no local file, fallback to Unsplash Source
         if image_url.is_empty() {
             let keywords = match *cat_key {
@@ -103,6 +114,7 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
             let sig: u64 = rng.gen();
             image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
         }
+
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 

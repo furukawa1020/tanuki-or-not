@@ -103,6 +103,8 @@ struct GeneratedQuizResponse {
 struct AdminUploadJson {
     filename: String,
     b64: String,
+    rights_confirmed: Option<bool>,
+    uploader: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -113,13 +115,17 @@ struct AdminUploadResult {
     message: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct AssetIndexEntry {
     filename: String,
     size: u64,
     thumb: bool,
     phash: Option<String>,
     uploaded_at: String,
+    // optional metadata to help auditing
+    source: Option<String>,
+    license: Option<String>,
+    uploader: Option<String>,
 }
 
 fn index_path() -> PathBuf { PathBuf::from("public").join("assets").join("index.json") }
@@ -299,10 +305,16 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
 
 // simple admin upload via JSON { filename, b64 }
 async fn admin_upload_json(headers: HeaderMap, Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
-    // require Authorization header (or accept ?token not available for JSON endpoint)
+    // require Authorization: Bearer <token>
     let header_token = token_from_headers(&headers);
-    if header_token.is_none() {
-        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized: missing Authorization header".to_string()) });
+    let token = header_token.unwrap_or_default();
+    if !check_admin_token_token(&token) {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized: invalid admin token".to_string()) });
+    }
+
+    // require rights confirmation
+    if payload.rights_confirmed.unwrap_or(false) == false {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("upload rejected: uploader must confirm they have rights to use this image".to_string()) });
     }
     // sanitize filename: keep ascii alnum, dash, underscore and extension
     let name = payload.filename.clone();
@@ -364,7 +376,16 @@ async fn admin_upload_json(headers: HeaderMap, Json(payload): Json<AdminUploadJs
     let uploaded_at = chrono::Utc::now().to_rfc3339();
     let mut idx = load_index();
     idx.retain(|e| e.filename != target.file_name().and_then(|s| s.to_str()).unwrap_or(""));
-    idx.push(AssetIndexEntry { filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), size, thumb: true, phash: Some(phash.clone()), uploaded_at });
+    idx.push(AssetIndexEntry {
+        filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+        size,
+        thumb: true,
+        phash: Some(phash.clone()),
+        uploaded_at: uploaded_at.clone(),
+        source: None,
+        license: None,
+        uploader: payload.uploader.clone().or_else(|| Some(mask_token(&token))),
+    });
     save_index(&idx);
 
     Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None })
@@ -379,44 +400,66 @@ async fn admin_upload_multipart(headers: HeaderMap, Query(q): Query<StdHashMap<S
         return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
     }
 
-    // find first file field
+    // collect fields and file bytes
+    let mut collected_bytes: Option<Vec<u8>> = None;
+    let mut collected_filename: Option<String> = None;
+    let mut rights_confirmed: bool = false;
+    let mut uploader_field: Option<String> = None;
+
     while let Some(field) = multipart.next_field().await.unwrap_or(None) {
-    let _name = field.name().map(|s| s.to_string()).unwrap_or_else(|| "file".to_string());
-        if field.file_name().is_none() { continue; }
-        let filename = field.file_name().unwrap().to_string();
-        // sanitize
-        if filename.contains('/') || filename.contains('\\') { continue; }
-
-        let safe: String = filename.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
-
-        // read bytes
-        let data = match field.bytes().await {
-            Ok(d) => d.to_vec(),
-            Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("read field error: {}", e)) }),
-        };
-
-        // validate image
-        let img_dyn = match image::load_from_memory(&data) {
-            Ok(d) => d,
-            Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("invalid image data: {}", e)) }),
-        };
-
-        let assets_dir = PathBuf::from("public").join("assets");
-        let thumbs_dir = assets_dir.join("thumbs");
-        if let Err(e) = std::fs::create_dir_all(&thumbs_dir) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("mkdir error: {}", e)) }); }
-
-        let mut target = assets_dir.join(&safe);
-        let mut counter = 1;
-        while target.exists() {
-            let tmp = PathBuf::from(&safe);
-            let stem = tmp.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-            let ext = tmp.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let newname = if ext.is_empty() { format!("{}-{}", stem, counter) } else { format!("{}-{}.{}", stem, counter, ext) };
-            target = assets_dir.join(&newname);
-            counter += 1;
+        let name = field.name().map(|s| s.to_string()).unwrap_or_default();
+        if field.file_name().is_some() {
+            let filename = field.file_name().unwrap().to_string();
+            if filename.contains('/') || filename.contains('\\') { continue; }
+            let safe: String = filename.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
+            match field.bytes().await {
+                Ok(d) => { collected_bytes = Some(d.to_vec()); collected_filename = Some(safe); }
+                Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("read field error: {}", e)) }),
+            }
+        } else {
+            if name == "rights_confirmed" {
+                if let Ok(txt) = field.text().await {
+                    let lc = txt.to_lowercase();
+                    if lc == "1" || lc == "true" || lc == "on" { rights_confirmed = true; }
+                }
+            } else if name == "uploader" {
+                if let Ok(txt) = field.text().await { uploader_field = Some(txt); }
+            }
         }
+    }
 
-        if let Err(e) = std::fs::write(&target, &data) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("write error: {}", e)) }); }
+    let data = match collected_bytes {
+        Some(d) => d,
+        None => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("no file field found".to_string()) }),
+    };
+
+    if !rights_confirmed {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("upload rejected: uploader must confirm they have rights to use this image".to_string()) });
+    }
+
+    let filename = collected_filename.unwrap_or_else(|| format!("upload-{}.png", chrono::Utc::now().timestamp()));
+    // validate image
+    let img_dyn = match image::load_from_memory(&data) {
+        Ok(d) => d,
+        Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("invalid image data: {}", e)) }),
+    };
+
+    let assets_dir = PathBuf::from("public").join("assets");
+    let thumbs_dir = assets_dir.join("thumbs");
+    if let Err(e) = std::fs::create_dir_all(&thumbs_dir) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("mkdir error: {}", e)) }); }
+
+    let mut target = assets_dir.join(&filename);
+    let mut counter = 1;
+    while target.exists() {
+        let tmp = PathBuf::from(&filename);
+        let stem = tmp.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let ext = tmp.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let newname = if ext.is_empty() { format!("{}-{}", stem, counter) } else { format!("{}-{}.{}", stem, counter, ext) };
+        target = assets_dir.join(&newname);
+        counter += 1;
+    }
+
+    if let Err(e) = std::fs::write(&target, &data) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("write error: {}", e)) }); }
 
     let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
     let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
@@ -428,18 +471,19 @@ async fn admin_upload_multipart(headers: HeaderMap, Query(q): Query<StdHashMap<S
     let uploaded_at = chrono::Utc::now().to_rfc3339();
     let mut idx = load_index();
     idx.retain(|e| e.filename != target.file_name().and_then(|s| s.to_str()).unwrap_or(""));
-    idx.push(AssetIndexEntry { filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), size, thumb: true, phash: Some(phash.clone()), uploaded_at });
+    idx.push(AssetIndexEntry {
+        filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+        size,
+        thumb: true,
+        phash: Some(phash.clone()),
+        uploaded_at: uploaded_at.clone(),
+        source: None,
+        license: None,
+        uploader: uploader_field.or_else(|| Some(mask_token(&token))),
+    });
     save_index(&idx);
 
-    return Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None });
-    }
-
-    Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("no file field found".to_string()) })
-}
-
-fn check_admin_token_token(token: &str) -> bool {
-    let expected = env::var("ADMIN_TOKEN").unwrap_or_else(|_| "admin-token".to_string());
-    token == expected
+    Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None })
 }
 
 fn token_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -452,6 +496,11 @@ fn token_from_headers(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
+}
+
+fn mask_token(token: &str) -> String {
+    let t = token.trim();
+    if t.len() <= 8 { t.to_string() } else { format!("{}...{}", &t[..4], &t[t.len()-4..]) }
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
@@ -584,6 +633,8 @@ struct AdminListEntry {
     filename: String,
     size: u64,
     thumb: bool,
+    uploaded_at: Option<String>,
+    uploader: Option<String>,
 }
 
 async fn admin_list(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<AdminListEntry>> {
@@ -596,7 +647,7 @@ async fn admin_list(headers: HeaderMap, Query(q): Query<StdHashMap<String, Strin
     let index = load_index();
     if !index.is_empty() {
         for e in index {
-            out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb });
+            out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb, uploaded_at: Some(e.uploaded_at.clone()), uploader: e.uploader.clone() });
         }
     } else {
         if let Ok(entries) = std::fs::read_dir(&assets_dir) {
@@ -605,7 +656,7 @@ async fn admin_list(headers: HeaderMap, Query(q): Query<StdHashMap<String, Strin
                     if let Some(name) = e.file_name().to_str() {
                         // skip thumbs directory
                         if name == "thumbs" { continue; }
-                        out.push(AdminListEntry { filename: name.to_string(), size: mt.len(), thumb: PathBuf::from("public").join("assets").join("thumbs").join(name).exists() });
+                        out.push(AdminListEntry { filename: name.to_string(), size: mt.len(), thumb: PathBuf::from("public").join("assets").join("thumbs").join(name).exists(), uploaded_at: None, uploader: None });
                     }
                 }
             }

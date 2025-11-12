@@ -11,6 +11,11 @@ use std::io::Cursor;
 use bytes::Bytes;
 use axum::http::header;
 use rand::Rng;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -31,12 +36,15 @@ struct QuizResult {
     correct_answer: String,
 }
 
-// For generated-quiz submissions
+// For generated-quiz submissions (client -> server)
 #[derive(Deserialize)]
 struct GeneratedSubmit {
+    quiz_id: String,
     selected_category: String,
-    answer_category: String,
 }
+
+// In-memory store for active generated quizzes
+static QUIZ_STORE: Lazy<Mutex<HashMap<String, (GeneratedQuiz, Instant)>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn get_all_questions() -> Vec<QuizQuestion> {
     vec![
@@ -59,21 +67,29 @@ fn get_all_questions() -> Vec<QuizQuestion> {
     ]
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct GeneratedChoice {
     id: usize,
     image_url: String,
     category: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct GeneratedQuiz {
     question: String,
     choices: Vec<GeneratedChoice>,
     answer_category: String,
 }
 
-async fn generate_quiz() -> Json<GeneratedQuiz> {
+// Response returned to client when creating a quiz (no answer included)
+#[derive(Serialize)]
+struct GeneratedQuizResponse {
+    id: String,
+    question: String,
+    choices: Vec<GeneratedChoice>,
+}
+
+async fn generate_quiz() -> Json<GeneratedQuizResponse> {
     // Use free image source URLs (no download). We'll return external URLs that the client can load directly.
     let mut choices: Vec<GeneratedChoice> = Vec::new();
     // categories and preferred local filenames (user should place real photos here)
@@ -132,7 +148,13 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     };
 
     let question = format!("次の画像のうち、{} はどれですか？", label);
-    Json(GeneratedQuiz { question, choices, answer_category: target_cat })
+    let quiz = GeneratedQuiz { question: question.clone(), choices: choices.clone(), answer_category: target_cat.clone() };
+
+    // generate id and store it
+    let id = Uuid::new_v4().to_string();
+    QUIZ_STORE.lock().insert(id.clone(), (quiz, Instant::now()));
+
+    Json(GeneratedQuizResponse { id, question, choices })
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
@@ -243,11 +265,21 @@ async fn submit_answer(Json(payload): Json<QuizAnswer>) -> Json<QuizResult> {
 }
 
 async fn submit_generated(Json(payload): Json<GeneratedSubmit>) -> Json<QuizResult> {
-    let correct = payload.selected_category == payload.answer_category;
-    Json(QuizResult {
-        correct,
-        correct_answer: payload.answer_category.clone(),
-    })
+    // lookup quiz by id
+    let mut store = QUIZ_STORE.lock();
+    if let Some((stored_quiz, _)) = store.remove(&payload.quiz_id) {
+        let correct = payload.selected_category == stored_quiz.answer_category;
+        Json(QuizResult {
+            correct,
+            correct_answer: stored_quiz.answer_category.clone(),
+        })
+    } else {
+        // missing or expired quiz — treat as incorrect but provide a generic response
+        Json(QuizResult {
+            correct: false,
+            correct_answer: "unknown".to_string(),
+        })
+    }
 }
 
 #[tokio::main]
@@ -269,6 +301,22 @@ async fn main() {
     println!("listening on http://{}", addr);
 
     // Use axum's serve helper with a TcpListener
+    // spawn a background cleanup task to remove old quizzes
+    let cleanup_handle = tokio::spawn(async move {
+        let ttl = Duration::from_secs(60 * 5); // 5 minutes
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let now = Instant::now();
+            let mut store = QUIZ_STORE.lock();
+            let keys_to_remove: Vec<String> = store.iter()
+                .filter_map(|(k, (_v, ts))| if now.duration_since(*ts) > ttl { Some(k.clone()) } else { None })
+                .collect();
+            for k in keys_to_remove {
+                store.remove(&k);
+            }
+        }
+    });
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

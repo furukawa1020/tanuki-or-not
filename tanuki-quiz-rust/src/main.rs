@@ -294,6 +294,15 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
         return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) });
     }
 
+    // compute phash and update index
+    let phash = compute_ahash(&img_dyn);
+    let size = target.metadata().map(|m| m.len()).unwrap_or(0);
+    let uploaded_at = chrono::Utc::now().to_rfc3339();
+    let mut idx = load_index();
+    idx.retain(|e| e.filename != target.file_name().and_then(|s| s.to_str()).unwrap_or(""));
+    idx.push(AssetIndexEntry { filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), size, thumb: true, phash: Some(phash.clone()), uploaded_at });
+    save_index(&idx);
+
     Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None })
 }
 
@@ -344,11 +353,20 @@ async fn admin_upload_multipart(Query(q): Query<StdHashMap<String, String>>, mut
 
         if let Err(e) = std::fs::write(&target, &data) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("write error: {}", e)) }); }
 
-        let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
-        let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
-        if let Err(e) = thumb.save(&thumb_path) { return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) }); }
+    let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
+    let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
+    if let Err(e) = thumb.save(&thumb_path) { return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) }); }
 
-        return Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None });
+    // compute phash and update index
+    let phash = compute_ahash(&img_dyn);
+    let size = target.metadata().map(|m| m.len()).unwrap_or(0);
+    let uploaded_at = chrono::Utc::now().to_rfc3339();
+    let mut idx = load_index();
+    idx.retain(|e| e.filename != target.file_name().and_then(|s| s.to_str()).unwrap_or(""));
+    idx.push(AssetIndexEntry { filename: target.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string(), size, thumb: true, phash: Some(phash.clone()), uploaded_at });
+    save_index(&idx);
+
+    return Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None });
     }
 
     Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("no file field found".to_string()) })
@@ -496,13 +514,21 @@ async fn admin_list(Query(q): Query<StdHashMap<String, String>>) -> Json<Vec<Adm
     if !check_admin_token_token(&token) { return Json(vec![]); }
     let assets_dir = PathBuf::from("public").join("assets");
     let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&assets_dir) {
-        for e in entries.flatten() {
-            if let Ok(mt) = e.metadata() {
-                if let Some(name) = e.file_name().to_str() {
-                    // skip thumbs directory
-                    if name == "thumbs" { continue; }
-                    out.push(AdminListEntry { filename: name.to_string(), size: mt.len(), thumb: PathBuf::from("public").join("assets").join("thumbs").join(name).exists() });
+    // enrich with index.json if present
+    let index = load_index();
+    if !index.is_empty() {
+        for e in index {
+            out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb });
+        }
+    } else {
+        if let Ok(entries) = std::fs::read_dir(&assets_dir) {
+            for e in entries.flatten() {
+                if let Ok(mt) = e.metadata() {
+                    if let Some(name) = e.file_name().to_str() {
+                        // skip thumbs directory
+                        if name == "thumbs" { continue; }
+                        out.push(AdminListEntry { filename: name.to_string(), size: mt.len(), thumb: PathBuf::from("public").join("assets").join("thumbs").join(name).exists() });
+                    }
                 }
             }
         }

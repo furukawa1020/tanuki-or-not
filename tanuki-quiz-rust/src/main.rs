@@ -133,8 +133,15 @@ async fn proxy_image(Path(key): Path<String>, Query(params): Query<HashMap<Strin
     let unsplash_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
 
     // Fetch image from Unsplash (follow redirects) and return bytes
-    let client = reqwest::Client::new();
-    match client.get(&unsplash_url).send().await {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .unwrap();
+    match client.get(&unsplash_url)
+        .header(reqwest::header::ACCEPT, "image/*")
+        .header(reqwest::header::REFERER, "https://unsplash.com/")
+        .send()
+        .await {
         Ok(resp) => {
             // clone the content-type header before consuming the response
             let ct_hdr = resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();

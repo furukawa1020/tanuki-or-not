@@ -123,7 +123,32 @@ async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {
         Ok(bytes) => {
             let mut headers = axum::http::HeaderMap::new();
             headers.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("image/png"));
-            (axum::http::StatusCode::OK, headers, Bytes::from(bytes)).into_response()
+                // If upstream didn't return an image content-type, fall back to a generated PNG
+                let mut is_image = false;
+                if let Some(ct) = ct_hdr {
+                    if let Ok(ct_str) = ct.to_str() {
+                        if ct_str.starts_with("image/") {
+                            if let Ok(hv) = axum::http::HeaderValue::from_str(ct_str) {
+                                headers.insert(axum::http::header::CONTENT_TYPE, hv);
+                            }
+                            is_image = true;
+                        }
+                    }
+                }
+                if !is_image {
+                    // upstream returned HTML or error page; generate a local PNG fallback
+                    if let Ok(png) = generate_image_bytes(key.as_str()) {
+                        let mut headers = axum::http::HeaderMap::new();
+                        headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/png"));
+                        return (axum::http::StatusCode::OK, headers, Bytes::from(png)).into_response();
+                    } else {
+                        return (axum::http::StatusCode::BAD_GATEWAY).into_response();
+                    }
+                }
+                if !headers.contains_key(axum::http::header::CONTENT_TYPE) {
+                    headers.insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("image/jpeg"));
+                }
+                (axum::http::StatusCode::OK, headers, Bytes::from(bytes)).into_response()
         }
         Err(_) => (axum::http::StatusCode::NOT_FOUND).into_response(),
     }

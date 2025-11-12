@@ -76,24 +76,33 @@ struct GeneratedQuiz {
 async fn generate_quiz() -> Json<GeneratedQuiz> {
     // Use free image source URLs (no download). We'll return external URLs that the client can load directly.
     let mut choices: Vec<GeneratedChoice> = Vec::new();
-
-    // categories and search keywords
-    // Prefer species-specific searches so choices can include たぬき/アナグマ/ハクビシン where possible.
-    // We keep a generic 'animal' fallback as a catch-all.
-    let categories = vec![
-        ("tanuki", "tanuki,raccoon dog,狸"),
-        ("anaguma", "badger,anaguma,アナグマ"),
-        ("hakubishin", "masked palm civet,hakubishin,ハクビシン"),
-        ("animal", "animal,wildlife"),
-    ];
-
+    // categories and preferred local filenames (user should place real photos here)
+    let categories = vec!["tanuki", "anaguma", "hakubishin"];
+    // For each category, prefer local files public/assets/<category><n>.jpg (1..3)
+    let static_dir = PathBuf::from("public").join("assets");
     let mut rng = rand::thread_rng();
-
-    for (i, (cat_key, keywords)) in categories.iter().enumerate() {
-        // Return external Unsplash Source URLs so the browser loads images directly.
-        let mut rng = rand::thread_rng();
-        let sig: u64 = rng.gen();
-        let image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
+    for (i, cat_key) in categories.iter().enumerate() {
+        let mut image_url = String::new();
+        // try local files
+        for n in 1..=3 {
+            let fname = format!("{}{}.jpg", cat_key, n);
+            let fpath = static_dir.join(&fname);
+            if fpath.exists() {
+                image_url = format!("/assets/{}", fname);
+                break;
+            }
+        }
+        // if no local file, fallback to Unsplash Source
+        if image_url.is_empty() {
+            let keywords = match *cat_key {
+                "tanuki" => "tanuki,raccoon dog,狸",
+                "anaguma" => "badger,anaguma,アナグマ",
+                "hakubishin" => "masked palm civet,hakubishin,ハクビシン",
+                _ => "animal,wildlife",
+            };
+            let sig: u64 = rng.gen();
+            image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
+        }
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 

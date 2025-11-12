@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use image::imageops::FilterType;
+// image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
 
@@ -202,7 +202,7 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
     };
 
     // verify image
-    let dyn = match image::load_from_memory(&data) {
+    let img_dyn = match image::load_from_memory(&data) {
         Ok(d) => d,
         Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("invalid image data: {}", e)) }),
     };
@@ -231,7 +231,7 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
     }
 
     // create thumbnail 320x240 (maintain aspect via thumbnail method)
-    let thumb = dyn.thumbnail(320, 240).to_rgba8();
+    let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
     let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
     if let Err(e) = thumb.save(&thumb_path) {
         return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) });

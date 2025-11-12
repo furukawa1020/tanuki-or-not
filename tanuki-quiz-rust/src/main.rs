@@ -302,7 +302,7 @@ async fn main() {
 
     // Use axum's serve helper with a TcpListener
     // spawn a background cleanup task to remove old quizzes
-    let cleanup_handle = tokio::spawn(async move {
+    let _cleanup_handle = tokio::spawn(async move {
         let ttl = Duration::from_secs(60 * 5); // 5 minutes
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;

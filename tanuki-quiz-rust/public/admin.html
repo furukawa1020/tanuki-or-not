@@ -114,7 +114,18 @@
             const r = await fetch('/api/admin/delete?token=' + encodeURIComponent(token), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: item.filename }) });
             const jr = await r.json(); if (jr.ok) { await refreshList(); } else { alert('削除失敗: ' + (jr.message||'')); }
           };
+          const sim = document.createElement('button');
+          sim.textContent = '類似を探す';
+          sim.style.marginLeft = '0.5rem';
+          sim.onclick = async () => {
+            const r = await fetch('/api/admin/similar?token=' + encodeURIComponent(token) + '&filename=' + encodeURIComponent(item.filename));
+            const jr = await r.json();
+            if (Array.isArray(jr) && jr.length > 0) {
+              alert('類似画像:\n' + jr.map(x => x.filename + ' (' + Math.round(x.size/1024) + 'KB)').join('\n'));
+            } else { alert('類似画像は見つかりませんでした'); }
+          };
           d.appendChild(del);
+          d.appendChild(sim);
           container.appendChild(d);
         });
       } catch (e) { document.getElementById('list').innerText = '取得失敗: ' + e; }

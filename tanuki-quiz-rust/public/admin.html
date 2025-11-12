@@ -23,10 +23,17 @@
     <label>保存ファイル名（例: tanuki1.jpg）: <input id="filename" type="text" placeholder="example.jpg" /></label>
   </div>
   <div style="margin-top:0.5rem">
-    <button id="upload">アップロード</button>
+    <label>管理トークン: <input id="admintoken" type="text" placeholder="admin-token" value="admin-token" /></label>
+  </div>
+  <div style="margin-top:0.5rem">
+    <button id="upload">アップロード (base64 JSON)</button>
+    <button id="upload-mp">アップロード (multipart/form-data)</button>
   </div>
 
   <div id="result" style="margin-top:1rem"></div>
+  <hr />
+  <h2>アップロード済みファイル一覧</h2>
+  <div id="list">読み込み中...</div>
 
   <script>
     const fileInput = document.getElementById('file');
@@ -72,6 +79,49 @@
         result.innerHTML = `<div class="err">ネットワークエラー: ${e}</div>`;
       }
     });
+
+    document.getElementById('upload-mp').addEventListener('click', async () => {
+      result.textContent = '';
+      if (!currentFile) { result.innerHTML = '<span class="err">ファイルを選択してください</span>'; return; }
+      const name = filenameInput.value && filenameInput.value.trim() ? filenameInput.value.trim() : currentFile.name;
+      const token = document.getElementById('admintoken').value || '';
+      const fd = new FormData();
+      fd.append('file', currentFile, name);
+      try {
+        const res = await fetch('/api/admin/upload_multipart', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+        const j = await res.json();
+        if (j.ok) { result.innerHTML = `<div class="ok">multipart アップロード成功: ${j.saved_filename}</div>`; await refreshList(); } else { result.innerHTML = `<div class="err">失敗: ${j.message||'unknown'}</div>`; }
+      } catch (e) { result.innerHTML = `<div class="err">ネットワークエラー: ${e}</div>`; }
+    });
+
+    async function refreshList() {
+      const token = document.getElementById('admintoken').value || '';
+      try {
+        const res = await fetch('/api/admin/list', { headers: { 'Authorization': 'Bearer ' + token } });
+        const arr = await res.json();
+        const container = document.getElementById('list');
+        if (!Array.isArray(arr)) { container.innerHTML = '認証に失敗しました'; return; }
+        container.innerHTML = '';
+        arr.forEach(item => {
+          const d = document.createElement('div');
+          d.style.marginBottom = '0.5rem';
+          const thumb = item.thumb ? `<img src="/assets/thumbs/${item.filename}" style="width:120px;height:90px;object-fit:cover;margin-right:0.5rem">` : '';
+          d.innerHTML = `${thumb}<strong>${item.filename}</strong> (${Math.round(item.size/1024)} KB) `;
+          const del = document.createElement('button');
+          del.textContent = '削除';
+          del.onclick = async () => {
+            if (!confirm('削除しますか？')) return;
+            const r = await fetch('/api/admin/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ filename: item.filename }) });
+            const jr = await r.json(); if (jr.ok) { await refreshList(); } else { alert('削除失敗: ' + (jr.message||'')); }
+          };
+          d.appendChild(del);
+          container.appendChild(d);
+        });
+      } catch (e) { document.getElementById('list').innerText = '取得失敗: ' + e; }
+    }
+
+    // refresh list on load
+    setTimeout(refreshList, 300);
 
     function readFileAsBase64(file) {
       return new Promise((resolve, reject) => {

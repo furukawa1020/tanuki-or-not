@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Upload - Tanuki Quiz</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; padding: 2rem; }
+    .preview { max-width: 320px; max-height: 240px; object-fit: cover; display:block; margin-top:0.5rem }
+    .ok { color: green }
+    .err { color: red }
+  </style>
+</head>
+<body>
+  <h1>管理用画像アップロード</h1>
+  <p>画像を選択してアップロードします。送信方式は base64 を JSON に入れて POST します（簡易実装）。</p>
+
+  <label>ファイル選択: <input type="file" id="file" accept="image/*"></label>
+  <div>
+    <img id="preview" class="preview" src="" alt="preview" style="display:none" />
+  </div>
+  <div style="margin-top:0.5rem">
+    <label>保存ファイル名（例: tanuki1.jpg）: <input id="filename" type="text" placeholder="example.jpg" /></label>
+  </div>
+  <div style="margin-top:0.5rem">
+    <button id="upload">アップロード</button>
+  </div>
+
+  <div id="result" style="margin-top:1rem"></div>
+
+  <script>
+    const fileInput = document.getElementById('file');
+    const preview = document.getElementById('preview');
+    const uploadBtn = document.getElementById('upload');
+    const filenameInput = document.getElementById('filename');
+    const result = document.getElementById('result');
+
+    let currentFile = null;
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      currentFile = f;
+      filenameInput.value = filenameInput.value || f.name;
+      const url = URL.createObjectURL(f);
+      preview.src = url; preview.style.display = '';
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      result.textContent = '';
+      if (!currentFile) { result.innerHTML = '<span class="err">ファイルを選択してください</span>'; return; }
+      const name = filenameInput.value && filenameInput.value.trim() ? filenameInput.value.trim() : currentFile.name;
+      // read as base64
+      const b64 = await readFileAsBase64(currentFile);
+      // strip data:*/*;base64, prefix
+      const comma = b64.indexOf(',');
+      const payload = comma >= 0 ? b64.slice(comma+1) : b64;
+
+      // post JSON
+      try {
+        const res = await fetch('/api/admin/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: name, b64: payload })
+        });
+        const j = await res.json();
+        if (j.ok) {
+          result.innerHTML = `<div class="ok">アップロード成功: ${j.saved_filename} サムネ: ${j.thumb_filename}</div>`;
+        } else {
+          result.innerHTML = `<div class="err">失敗: ${j.message || 'unknown'}</div>`;
+        }
+      } catch (e) {
+        result.innerHTML = `<div class="err">ネットワークエラー: ${e}</div>`;
+      }
+    });
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = reject;
+        fr.readAsDataURL(file);
+      });
+    }
+  </script>
+</body>
+</html>

@@ -14,3 +14,4 @@ Hakubishin (masked palm civet):
 - hakubishin3.jpg: https://commons.wikimedia.org/wiki/File:Paguma_larvata_75486445.jpg
 
 All files sourced from Wikimedia Commons; check each file's description page for license/attribution details before public redistribution.
+\nAdditional images added:\n- tanuki4.jpg: https://commons.wikimedia.org/wiki/File:Tanuki01_960.jpg\n- tanuki5.jpg: https://commons.wikimedia.org/wiki/File:Nyctereutes_procyonoides_1_(Piotr_Kuczynski).jpg\n- anaguma4.jpg: https://commons.wikimedia.org/wiki/File:European_Badger_-_Meles_meles_(52261502699).jpg\n- anaguma5.jpg: https://commons.wikimedia.org/wiki/File:European_Badger_-_Meles_meles_-_Scotland_(53260881618).jpg\n- hakubishin4.jpg: https://commons.wikimedia.org/wiki/File:Palm_civet_on_tree_(detail).jpg\n- hakubishin5.jpg: https://commons.wikimedia.org/wiki/File:Paguma_larvata_75496722.jpg\n

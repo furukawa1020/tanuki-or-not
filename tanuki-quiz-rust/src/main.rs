@@ -186,12 +186,18 @@ mod tests {
     fn test_ahash_and_hamming_different_images() {
         let mut a = RgbaImage::new(16, 16);
         for p in a.pixels_mut() { *p = image::Rgba([10, 10, 10, 255]); }
+        // make b with left half dark and right half bright so phash should differ
         let mut b = RgbaImage::new(16, 16);
-        for p in b.pixels_mut() { *p = image::Rgba([240, 240, 240, 255]); }
+        for y in 0..16 {
+            for x in 0..16 {
+                let v = if x < 8 { 20 } else { 230 };
+                b.put_pixel(x, y, image::Rgba([v, v, v, 255]));
+            }
+        }
         let ha = compute_ahash(&DynamicImage::ImageRgba8(a));
         let hb = compute_ahash(&DynamicImage::ImageRgba8(b));
         let dist = hamming_hex(&ha, &hb).unwrap();
-        assert!(dist > 0);
+        assert!(dist > 0, "expected different images to have non-zero Hamming distance, got 0 (ha={} hb={})", ha, hb);
     }
 }
 

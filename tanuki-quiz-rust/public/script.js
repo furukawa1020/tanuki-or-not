@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/submit_generated', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ selected_category: choice.category, answer_category: currentQuiz.answer_category })
+                body: JSON.stringify({ quiz_id: currentQuiz.id, selected_category: choice.category })
             });
 
             if (res.ok) {
@@ -146,13 +146,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function fallbackLocalCheck(choice) {
-        const correct = choice.category === currentQuiz.answer_category;
-        if (correct) {
-            questionText.textContent = '正解！おめでとう🎉';
-        } else {
-            questionText.textContent = `残念！正解は「${currentQuiz.answer_category}」でした。`;
-        }
-        setupShareButton(correct);
+            if (currentQuiz && currentQuiz.answer_category) {
+                const correct = choice.category === currentQuiz.answer_category;
+                if (correct) {
+                    questionText.textContent = '正解！おめでとう🎉';
+                } else {
+                    questionText.textContent = `残念！正解は「${currentQuiz.answer_category}」でした。`;
+                }
+                setupShareButton(correct);
+            } else {
+                // no authoritative answer available locally
+                questionText.textContent = '正解の照合ができませんでした（サーバーに接続できません）。';
+                setupShareButton(false);
+            }
         shareContainer.style.display = 'block';
     }
 

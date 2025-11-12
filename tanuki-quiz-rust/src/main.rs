@@ -18,6 +18,10 @@ use std::time::{Duration, Instant};
 use uuid::Uuid;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use axum::extract::Multipart;
+use axum::http::HeaderMap;
+use axum::extract::Extension;
+use tokio::io::AsyncReadExt;
 // image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
@@ -241,6 +245,72 @@ async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUp
     Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None })
 }
 
+// multipart upload handler (form submit)
+async fn admin_upload_multipart(mut multipart: Multipart, headers: HeaderMap) -> Json<AdminUploadResult> {
+    // auth
+    if !check_admin_token(&headers) {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
+    }
+
+    // find first file field
+    while let Some(field) = multipart.next_field().await.unwrap_or(None) {
+        let name = field.name().map(|s| s.to_string()).unwrap_or_else(|| "file".to_string());
+        if field.file_name().is_none() { continue; }
+        let filename = field.file_name().unwrap().to_string();
+        // sanitize
+        if filename.contains('/') || filename.contains('\\') { continue; }
+
+        let safe: String = filename.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect();
+
+        // read bytes
+        let data = match field.bytes().await {
+            Ok(d) => d.to_vec(),
+            Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("read field error: {}", e)) }),
+        };
+
+        // validate image
+        let img_dyn = match image::load_from_memory(&data) {
+            Ok(d) => d,
+            Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("invalid image data: {}", e)) }),
+        };
+
+        let assets_dir = PathBuf::from("public").join("assets");
+        let thumbs_dir = assets_dir.join("thumbs");
+        if let Err(e) = std::fs::create_dir_all(&thumbs_dir) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("mkdir error: {}", e)) }); }
+
+        let mut target = assets_dir.join(&safe);
+        let mut counter = 1;
+        while target.exists() {
+            let tmp = PathBuf::from(&safe);
+            let stem = tmp.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+            let ext = tmp.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let newname = if ext.is_empty() { format!("{}-{}", stem, counter) } else { format!("{}-{}.{}", stem, counter, ext) };
+            target = assets_dir.join(&newname);
+            counter += 1;
+        }
+
+        if let Err(e) = std::fs::write(&target, &data) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("write error: {}", e)) }); }
+
+        let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
+        let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
+        if let Err(e) = thumb.save(&thumb_path) { return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) }); }
+
+        return Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None });
+    }
+
+    Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("no file field found".to_string()) })
+}
+
+fn check_admin_token(headers: &HeaderMap) -> bool {
+    let expected = env::var("ADMIN_TOKEN").unwrap_or_else(|_| "admin-token".to_string());
+    // check Authorization: Bearer <token> or x-admin-token
+    if let Some(v) = headers.get("authorization") {
+        if let Ok(s) = v.to_str() { if s.starts_with("Bearer ") && s[7..] == expected { return true; } }
+    }
+    if let Some(v) = headers.get("x-admin-token") { if let Ok(s) = v.to_str() { if s == expected { return true; } } }
+    false
+}
+
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
 
 async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {
@@ -366,6 +436,53 @@ async fn submit_generated(Json(payload): Json<GeneratedSubmit>) -> Json<QuizResu
     }
 }
 
+#[derive(Serialize)]
+struct AdminListEntry {
+    filename: String,
+    size: u64,
+    thumb: bool,
+}
+
+async fn admin_list(headers: HeaderMap) -> Json<Vec<AdminListEntry>> {
+    if !check_admin_token(&headers) {
+        return Json(vec![]);
+    }
+    let assets_dir = PathBuf::from("public").join("assets");
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&assets_dir) {
+        for e in entries.flatten() {
+            if let Ok(mt) = e.metadata() {
+                if let Some(name) = e.file_name().to_str() {
+                    // skip thumbs directory
+                    if name == "thumbs" { continue; }
+                    out.push(AdminListEntry { filename: name.to_string(), size: mt.len(), thumb: PathBuf::from("public").join("assets").join("thumbs").join(name).exists() });
+                }
+            }
+        }
+    }
+    Json(out)
+}
+
+#[derive(Deserialize)]
+struct AdminDeleteReq { filename: String }
+
+async fn admin_delete(Json(payload): Json<AdminDeleteReq>, headers: HeaderMap) -> Json<AdminUploadResult> {
+    if !check_admin_token(&headers) {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("unauthorized".to_string()) });
+    }
+    let assets_dir = PathBuf::from("public").join("assets");
+    let target = assets_dir.join(&payload.filename);
+    let thumb = assets_dir.join("thumbs").join(&payload.filename);
+    let mut ok = false;
+    if target.exists() { let _ = std::fs::remove_file(&target); ok = true; }
+    if thumb.exists() { let _ = std::fs::remove_file(&thumb); }
+    if ok {
+        Json(AdminUploadResult { ok: true, saved_filename: Some(payload.filename), thumb_filename: None, message: None })
+    } else {
+        Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("not found".to_string()) })
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Build absolute path to `public` so the server works regardless of CWD
@@ -380,6 +497,9 @@ async fn main() {
         .route("/api/submit", post(submit_answer))
         .route("/api/submit_generated", post(submit_generated))
         .route("/api/admin/upload", post(admin_upload_json))
+        .route("/api/admin/upload_multipart", post(admin_upload_multipart))
+        .route("/api/admin/list", get(admin_list))
+        .route("/api/admin/delete", post(admin_delete))
         .nest_service("/", ServeDir::new(static_dir));
 
     let addr: SocketAddr = env::var("HOST_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string()).parse().unwrap();

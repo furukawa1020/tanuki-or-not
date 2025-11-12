@@ -14,8 +14,10 @@ body {
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     text-align: center;
-    max-width: 500px;
-    width: 90%;
+    /* allow wider layout while keeping it responsive */
+    max-width: 900px;
+    width: 95%;
+    box-sizing: border-box;
 }
 
 h1 {
@@ -23,18 +25,44 @@ h1 {
 }
 
 #quiz-image {
-    max-width: 100%;
-    height: auto;
+    width: 100%;
+    /* limit main quiz image height and crop nicely */
+    max-height: 420px;
+    object-fit: cover;
     border-radius: 5px;
     margin-bottom: 1rem;
     border: 1px solid #ddd;
+    display: block;
 }
 
 .options-container {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    display: flex;
+    flex-wrap: wrap;
     gap: 1rem;
+    justify-content: center;
     margin-top: 1.5rem;
+}
+
+/* each choice: image + button stacked */
+.choice-item {
+    width: calc(33.333% - 0.67rem);
+    min-width: 160px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.choice-image {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+}
+
+.choice-item .option-button {
+    margin-top: 0.6rem;
 }
 
 .option-button {

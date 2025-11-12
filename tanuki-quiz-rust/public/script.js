@@ -1,5 +1,6 @@
 
 document.addEventListener('DOMContentLoaded', () => {
+    const quizImage = document.getElementById('quiz-image');
     const questionEl = document.querySelector('#quiz-container h1') || document.querySelector('.container h1');
     const questionText = document.getElementById('result-message');
     const optionsContainer = document.getElementById('options');
@@ -17,6 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // display question
             if (questionEl) questionEl.textContent = 'たぬき？クイズ';
+            // hide the top quiz-image (we show choices instead)
+            if (quizImage) { quizImage.style.display = 'none'; }
             questionText.textContent = data.question || '';
 
             // render choices as images
@@ -48,6 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 optionsContainer.appendChild(wrapper);
             });
+
+            // make sure the options container is visible
+            optionsContainer.style.display = '';
 
         } catch (err) {
             console.warn('failed to load /api/generate_quiz - falling back to client-side source images', err);

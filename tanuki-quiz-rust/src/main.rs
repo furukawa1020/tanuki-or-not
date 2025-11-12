@@ -91,10 +91,10 @@ async fn generate_quiz() -> Json<GeneratedQuiz> {
     let mut rng = rand::thread_rng();
 
     for (i, (cat_key, keywords)) in categories.iter().enumerate() {
-        // Return proxied URLs so the server can fetch external images and serve them
+        // Return external Unsplash Source URLs so the browser loads images directly.
         let mut rng = rand::thread_rng();
         let sig: u64 = rng.gen();
-        let image_url = format!("/proxy/{}?sig={}", cat_key, sig);
+        let image_url = format!("https://source.unsplash.com/800x600/?{}&sig={}", keywords, sig);
         choices.push(GeneratedChoice { id: i + 1, image_url, category: cat_key.to_string() });
     }
 

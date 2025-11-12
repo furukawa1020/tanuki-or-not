@@ -222,7 +222,7 @@ async fn admin_similar(headers: HeaderMap, Query(q): Query<StdHashMap<String, St
         if e.filename == filename { continue; }
         if let (Some(a), Some(b)) = (Some(base.as_str()), e.phash.as_deref()) {
             if let Some(dist) = hamming_hex(a, b) {
-                if dist <= max_hamming { out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb }); }
+                if dist <= max_hamming { out.push(AdminListEntry { filename: e.filename.clone(), size: e.size, thumb: e.thumb, uploaded_at: Some(e.uploaded_at.clone()), uploader: e.uploader.clone() }); }
             }
         }
     }
@@ -305,6 +305,11 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
 
 // simple admin upload via JSON { filename, b64 }
 async fn admin_upload_json(headers: HeaderMap, Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
+    // if uploads are not enabled in this environment, reject to avoid accidental public uploads
+    if !uploads_enabled() {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("uploads are disabled in this environment (ENABLE_ADMIN_UPLOADS=false)".to_string()) });
+    }
+
     // require Authorization: Bearer <token>
     let header_token = token_from_headers(&headers);
     let token = header_token.unwrap_or_default();
@@ -393,6 +398,11 @@ async fn admin_upload_json(headers: HeaderMap, Json(payload): Json<AdminUploadJs
 
 // multipart upload handler (form submit)
 async fn admin_upload_multipart(headers: HeaderMap, Query(q): Query<StdHashMap<String, String>>, mut multipart: Multipart) -> Json<AdminUploadResult> {
+    // uploads are gated by ENABLE_ADMIN_UPLOADS env var (disabled by default)
+    if !uploads_enabled() {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("uploads are disabled in this environment (ENABLE_ADMIN_UPLOADS=false)".to_string()) });
+    }
+
     // prefer Authorization header, fallback to query ?token=
     let header_token = token_from_headers(&headers);
     let token = header_token.or_else(|| q.get("token").cloned()).unwrap_or_default();
@@ -501,6 +511,19 @@ fn token_from_headers(headers: &HeaderMap) -> Option<String> {
 fn mask_token(token: &str) -> String {
     let t = token.trim();
     if t.len() <= 8 { t.to_string() } else { format!("{}...{}", &t[..4], &t[t.len()-4..]) }
+}
+
+fn check_admin_token_token(token: &str) -> bool {
+    let expected = env::var("ADMIN_TOKEN").unwrap_or_else(|_| "admin-token".to_string());
+    token == expected
+}
+
+fn uploads_enabled() -> bool {
+    // By default uploads are disabled in production. Set ENABLE_ADMIN_UPLOADS=true to allow.
+    match env::var("ENABLE_ADMIN_UPLOADS") {
+        Ok(v) => v.to_lowercase() == "true",
+        Err(_) => false,
+    }
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly

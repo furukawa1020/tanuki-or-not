@@ -16,6 +16,11 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use image::imageops::FilterType;
+use std::fs::File;
+use std::io::Write;
 
 #[derive(Serialize, Clone)]
 struct QuizQuestion {
@@ -89,6 +94,20 @@ struct GeneratedQuizResponse {
     choices: Vec<GeneratedChoice>,
 }
 
+#[derive(Deserialize)]
+struct AdminUploadJson {
+    filename: String,
+    b64: String,
+}
+
+#[derive(Serialize)]
+struct AdminUploadResult {
+    ok: bool,
+    saved_filename: Option<String>,
+    thumb_filename: Option<String>,
+    message: Option<String>,
+}
+
 async fn generate_quiz() -> Json<GeneratedQuizResponse> {
     // Use free image source URLs (no download). We'll return external URLs that the client can load directly.
     let mut choices: Vec<GeneratedChoice> = Vec::new();
@@ -115,7 +134,13 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
             }
             if !candidates.is_empty() {
                 let picked = candidates.choose(&mut rng).unwrap().clone();
-                image_url = format!("/assets/{}", picked);
+                // prefer thumbnail if exists
+                let thumb_path = PathBuf::from("public").join("assets").join("thumbs").join(&picked);
+                if thumb_path.exists() {
+                    image_url = format!("/assets/thumbs/{}", picked);
+                } else {
+                    image_url = format!("/assets/{}", picked);
+                }
             }
         }
 
@@ -155,6 +180,64 @@ async fn generate_quiz() -> Json<GeneratedQuizResponse> {
     QUIZ_STORE.lock().insert(id.clone(), (quiz, Instant::now()));
 
     Json(GeneratedQuizResponse { id, question, choices })
+}
+
+// simple admin upload via JSON { filename, b64 }
+async fn admin_upload_json(Json(payload): Json<AdminUploadJson>) -> Json<AdminUploadResult> {
+    // sanitize filename: keep ascii alnum, dash, underscore and extension
+    let mut name = payload.filename.clone();
+    if name.contains('/') || name.contains('\\') {
+        return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some("invalid filename".to_string()) });
+    }
+    // lower-case extension
+    let safe: String = name.chars().map(|c| {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }
+    }).collect();
+    let safe = safe;
+
+    // decode base64
+    let data = match BASE64.decode(payload.b64.trim()) {
+        Ok(d) => d,
+        Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("base64 decode error: {}", e)) }),
+    };
+
+    // verify image
+    let dyn = match image::load_from_memory(&data) {
+        Ok(d) => d,
+        Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("invalid image data: {}", e)) }),
+    };
+
+    // ensure dirs
+    let assets_dir = PathBuf::from("public").join("assets");
+    let thumbs_dir = assets_dir.join("thumbs");
+    if let Err(e) = std::fs::create_dir_all(&thumbs_dir) { return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("mkdir error: {}", e)) }); }
+
+    // ensure unique filename if exists
+    let mut target = assets_dir.join(&safe);
+    let mut counter = 1;
+    while target.exists() {
+        // insert suffix before extension
+        let stem = PathBuf::from(&safe).file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let ext = PathBuf::from(&safe).extension().and_then(|s| s.to_str()).unwrap_or("");
+        let newname = if ext.is_empty() { format!("{}-{}", stem, counter) } else { format!("{}-{}.{}", stem, counter, ext) };
+        target = assets_dir.join(&newname);
+        counter += 1;
+    }
+
+    // write original
+    match File::create(&target).and_then(|mut f| f.write_all(&data)) {
+        Ok(_) => {},
+        Err(e) => return Json(AdminUploadResult { ok: false, saved_filename: None, thumb_filename: None, message: Some(format!("write error: {}", e)) }),
+    }
+
+    // create thumbnail 320x240 (maintain aspect via thumbnail method)
+    let thumb = dyn.thumbnail(320, 240).to_rgba8();
+    let thumb_path = thumbs_dir.join(target.file_name().and_then(|s| s.to_str()).unwrap_or("thumb.png"));
+    if let Err(e) = thumb.save(&thumb_path) {
+        return Json(AdminUploadResult { ok: false, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: None, message: Some(format!("thumbnail save error: {}", e)) });
+    }
+
+    Json(AdminUploadResult { ok: true, saved_filename: target.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), thumb_filename: thumb_path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string()), message: None })
 }
 
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly

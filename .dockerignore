@@ -1,0 +1,8 @@
+node_modules
+target
+.git
+.gitignore
+**/*.log
+**/node_modules
+pnpm-lock.yaml
+.vscode

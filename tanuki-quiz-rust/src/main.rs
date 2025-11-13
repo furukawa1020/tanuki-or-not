@@ -22,6 +22,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use axum::extract::Multipart;
 use axum::extract::Query;
 use std::collections::HashMap as StdHashMap;
+use reqwest::Client;
+use serde_json::Value;
 // image::imageops::FilterType not needed currently
 use std::fs::File;
 use std::io::Write;
@@ -526,6 +528,90 @@ fn uploads_enabled() -> bool {
     }
 }
 
+async fn populate_assets_from_commons() -> Result<(), String> {
+    // This function will attempt to download a small curated set of images
+    // from Wikimedia Commons for categories tanuki/anaguma/hakubishin.
+    // It only runs when triggered via env AUTO_POPULATE_ASSETS=true.
+
+    let client = Client::builder().user_agent("tanuki-quiz/1.0 (contact: maintainers)").build().map_err(|e| format!("client build error: {}", e))?;
+
+    let categories = vec![
+        ("tanuki", vec!["Nyctereutes procyonoides", "raccoon dog", "狸"]),
+        ("anaguma", vec!["Japanese badger", "Meles anakuma", "あなぐま", "badger"]),
+        ("hakubishin", vec!["Paguma larvata", "masked palm civet", "ハクビシン"]),
+    ];
+
+    let assets_dir = PathBuf::from("public").join("assets");
+    let thumbs_dir = assets_dir.join("thumbs");
+    std::fs::create_dir_all(&thumbs_dir).map_err(|e| format!("mkdir error: {}", e))?;
+
+    for (cat, terms) in categories {
+        // attempt searches until we have at least 1 image for this category
+        let mut found = false;
+        for term in terms {
+            // build query to Wikimedia Commons API
+            let api = format!("https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=filetype:bitmap%20{}&gsrlimit=5&prop=imageinfo&iiprop=url|extmetadata", urlencoding::encode(term));
+            let res = client.get(&api).send().await.map_err(|e| format!("api request error: {}", e))?;
+            if !res.status().is_success() { continue; }
+            let v: Value = res.json().await.map_err(|e| format!("json parse error: {}", e))?;
+            if let Some(pages) = v.get("query").and_then(|q| q.get("pages")) {
+                if let Some(obj) = pages.as_object() {
+                    for (_k, page) in obj.iter() {
+                        if let Some(iinfo) = page.get("imageinfo").and_then(|ii| ii.get(0)) {
+                            let url = iinfo.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                            let ext = iinfo.get("extmetadata").and_then(|e| e.get("LicenseShortName")).and_then(|x| x.get("value")).and_then(|s| s.as_str()).unwrap_or("");
+                            let license = ext.to_string();
+                            // accept public domain / cc-zero / cc-by
+                            let lower = license.to_lowercase();
+                            if lower.contains("public domain") || lower.contains("cc-zero") || lower.contains("cc0") || lower.contains("cc-by") || lower.contains("cc by") {
+                                // download
+                                if url.is_empty() { continue; }
+                                let img_res = client.get(url).send().await.map_err(|e| format!("image download error: {}", e))?;
+                                if !img_res.status().is_success() { continue; }
+                                let bytes = img_res.bytes().await.map_err(|e| format!("read bytes error: {}", e))?;
+                                // determine safe filename
+                                let filename = format!("{}-{}.jpg", cat, chrono::Utc::now().timestamp());
+                                let target = assets_dir.join(&filename);
+                                std::fs::write(&target, &bytes).map_err(|e| format!("write file error: {}", e))?;
+                                // create thumbnail
+                                let img_dyn = image::load_from_memory(&bytes).map_err(|e| format!("image decode error: {}", e))?;
+                                let thumb = img_dyn.thumbnail(320, 240).to_rgba8();
+                                let thumb_path = thumbs_dir.join(&filename);
+                                thumb.save(&thumb_path).map_err(|e| format!("thumb save error: {}", e))?;
+                                // compute phash and update index
+                                let phash = compute_ahash(&img_dyn);
+                                let size = target.metadata().map(|m| m.len()).unwrap_or(0);
+                                let uploaded_at = chrono::Utc::now().to_rfc3339();
+                                let mut idx = load_index();
+                                idx.retain(|e| e.filename != filename);
+                                idx.push(AssetIndexEntry {
+                                    filename: filename.clone(),
+                                    size,
+                                    thumb: true,
+                                    phash: Some(phash.clone()),
+                                    uploaded_at: uploaded_at.clone(),
+                                    source: Some(url.to_string()),
+                                    license: Some(license.clone()),
+                                    uploader: Some("wikimedia-auto".to_string()),
+                                });
+                                save_index(&idx);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !found {
+            // no acceptable image found for this category — skip
+            continue;
+        }
+    }
+
+    Ok(())
+}
+
 // proxy handler removed to avoid heavy dependencies; the client will load external Unsplash URLs directly
 
 async fn serve_image(Path(name): Path<String>) -> impl IntoResponse {
@@ -733,6 +819,14 @@ async fn main() {
     // Build absolute path to `public` so the server works regardless of CWD
     let mut static_dir: PathBuf = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     static_dir.push("public");
+
+    // Optionally auto-populate assets from Wikimedia Commons if requested.
+    if env::var("AUTO_POPULATE_ASSETS").map(|v| v.to_lowercase() == "true").unwrap_or(false) {
+        match populate_assets_from_commons().await {
+            Ok(_) => println!("auto-populated assets from Wikimedia Commons (if available)"),
+            Err(e) => eprintln!("AUTO_POPULATE_ASSETS failed: {}", e),
+        }
+    }
 
     // API routes registered first, then serve static files as the fallback.
     let app = Router::new()

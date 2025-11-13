@@ -21,3 +21,5 @@ once_cell = "1.20"
 parking_lot = "0.12"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "brotli"] }
+urlencoding = "2.1"

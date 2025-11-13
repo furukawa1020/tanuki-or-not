@@ -1,0 +1,31 @@
+app = "tanuki-quiz-rust" # change if name taken; recommended: tanuki-quiz-rust-<your-suffix>
+
+[build]
+  # Use existing Dockerfile in the repo root to build the image
+  image = ""
+
+[env]
+  # do not put secrets here; use `fly secrets set` instead
+  RUST_LOG = "info"
+
+[[mounts]]
+  # Fly-managed volume to persist `public/assets` between deploys
+  source = "assets"
+  destination = "/app/public/assets"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [services.concurrency]
+    type = "connections"
+    soft_limit = 25
+    hard_limit = 50

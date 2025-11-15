@@ -1,26 +1,26 @@
 import React, { useState } from 'react';
 import './App.css';
 
+const embeddedImages = {
+  tanuki: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Tanuki</text></svg>",
+  anaguma: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Badger</text></svg>",
+  hakubishin: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23000000'>Masked%20Palm%20Civet</text></svg>",
+};
+
+// Prefer serving local real photos from /assets/*.jpg (place files in public/assets/),
+// but fall back to embedded SVGs when no file is found.
 const animals = [
-  {
-    name: 'タヌキ',
-    // inline SVG data URI to avoid external requests and ensure availability in production
-    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Tanuki</text></svg>",
-  },
-  {
-    name: 'アナグマ',
-    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Badger</text></svg>",
-  },
-  {
-    name: 'ハクビシン',
-    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23000000'>Masked%20Palm%20Civet</text></svg>",
-  },
+  { name: 'タヌキ', imageLocal: '/assets/tanuki1.jpg', fallbackKey: 'tanuki' },
+  { name: 'アナグマ', imageLocal: '/assets/anaguma1.jpg', fallbackKey: 'anaguma' },
+  { name: 'ハクビシン', imageLocal: '/assets/hakubishin1.jpg', fallbackKey: 'hakubishin' },
 ];
 
 // questions配列を生成
 const questions = animals.map((animal) => {
   return {
-    image: animal.image,
+    // start with local path; <img onError> will fall back to embedded SVG if missing
+    image: animal.imageLocal,
+    fallbackKey: animal.fallbackKey,
     options: animals.map((a) => ({ answerText: a.name, isCorrect: a.name === animal.name })),
     correctAnswer: animal.name,
   };
@@ -76,7 +76,15 @@ function App() {
               <span>Question {currentQuestion + 1}</span>/{questions.length}
             </div>
             <div className="question-image">
-              <img src={questions[currentQuestion].image} alt="animal" />
+              <img
+                src={questions[currentQuestion].image}
+                alt="animal"
+                onError={(e) => {
+                  const q = questions[currentQuestion];
+                  const key = q.fallbackKey || 'tanuki';
+                  e.currentTarget.src = embeddedImages[key];
+                }}
+              />
             </div>
           </div>
           <div className="answer-section">

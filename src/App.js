@@ -27,6 +27,60 @@ const questions = animals.map((animal) => {
 });
 
 
+function QuestionImage({ question, embeddedImages }) {
+  const [src, setSrc] = useState(question.image);
+  const [tried, setTried] = useState([]);
+
+  // build candidate list (try the app's /assets, then the rust subproject's public assets,
+  // try common extensions, then embedded SVG)
+  const makeCandidates = () => {
+    const candidates = [];
+    if (question.image) candidates.push(question.image);
+    // if image looks like '/assets/tanuki1.jpg', extract basename
+    try {
+      const parts = question.image.split('/');
+      const name = parts[parts.length - 1];
+      if (name) {
+        candidates.push(`/tanuki-quiz-rust/public/assets/${name}`);
+        // try common alternate extensions
+        const base = name.replace(/\.(jpg|jpeg|png|gif)$/i, '');
+        candidates.push(`/tanuki-quiz-rust/public/assets/${base}.jpg`);
+        candidates.push(`/tanuki-quiz-rust/public/assets/${base}.png`);
+        candidates.push(`/tanuki-quiz-rust/public/assets/${base}.jpeg`);
+      }
+    } catch (e) {
+      // ignore
+    }
+    // final fallback: embedded svg
+    const key = question.fallbackKey || 'tanuki';
+    candidates.push(embeddedImages[key]);
+    return Array.from(new Set(candidates));
+  };
+
+  React.useEffect(() => {
+    // reset when question changes
+    setSrc(question.image);
+    setTried([]);
+  }, [question]);
+
+  const candidates = makeCandidates();
+
+  const handleError = () => {
+    // mark current src as tried and move to next
+    setTried((prev) => {
+      const next = [...prev, src];
+      // find next candidate not tried
+      const nextCandidate = candidates.find((c) => !next.includes(c));
+      if (nextCandidate) setSrc(nextCandidate);
+      return next;
+    });
+  };
+
+  return (
+    <img src={src} alt="animal" onError={handleError} style={{maxWidth: '100%', maxHeight: '100%', objectFit: 'contain'}} />
+  );
+}
+
 function App() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [score, setScore] = useState(0);
@@ -76,16 +130,12 @@ function App() {
               <span>Question {currentQuestion + 1}</span>/{questions.length}
             </div>
             <div className="question-image">
-              <img
-                src={questions[currentQuestion].image}
-                alt="animal"
-                onError={(e) => {
-                  const q = questions[currentQuestion];
-                  const key = q.fallbackKey || 'tanuki';
-                  e.currentTarget.src = embeddedImages[key];
-                }}
-              />
-            </div>
+                <QuestionImage
+                  question={questions[currentQuestion]}
+                  embeddedImages={embeddedImages}
+                  key={currentQuestion}
+                />
+              </div>
           </div>
           <div className="answer-section">
             <p>この動物はなに？</p>

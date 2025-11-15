@@ -13,3 +13,4 @@
 **/*.pdb
 
 public/assets/
+# Note: we will commit selected vetted photos into public/assets/ for the quiz.

@@ -4,15 +4,16 @@ import './App.css';
 const animals = [
   {
     name: 'タヌキ',
-    image: 'https://via.placeholder.com/400x300.png?text=Tanuki',
+    // inline SVG data URI to avoid external requests and ensure availability in production
+    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Tanuki</text></svg>",
   },
   {
     name: 'アナグマ',
-    image: 'https://via.placeholder.com/400x300.png?text=Badger',
+    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='36' fill='%23000000'>Badger</text></svg>",
   },
   {
     name: 'ハクビシン',
-    image: 'https://via.placeholder.com/400x300.png?text=Masked+Palm+Civet',
+    image: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300'><rect fill='%23dddddd' width='100%25' height='100%25'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23000000'>Masked%20Palm%20Civet</text></svg>",
   },
 ];
 

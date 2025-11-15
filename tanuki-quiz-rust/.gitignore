@@ -12,5 +12,5 @@
 # Ignore debug symbol pdb files
 **/*.pdb
 
-public/assets/
-# Note: we will commit selected vetted photos into public/assets/ for the quiz.
+## Allow committing vetted photos into public/assets/
+# (previously ignored; we now track vetted images intentionally)

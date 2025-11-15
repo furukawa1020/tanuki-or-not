@@ -8,7 +8,8 @@ WORKDIR /workspace/frontend
 COPY package.json package-lock.json* ./
 # copy optional package files from rust subfolder if present
 RUN if [ -f tanuki-quiz-rust/package.json ]; then mkdir -p ./tanuki-quiz-rust && cp tanuki-quiz-rust/package.json ./tanuki-quiz-rust/ || true; fi
-RUN npm ci --silent || true
+# install dependencies reliably (use npm install so missing lockfile won't fail)
+RUN npm install --legacy-peer-deps --silent
 
 # copy frontend sources (root-level CRA)
 COPY public ./public

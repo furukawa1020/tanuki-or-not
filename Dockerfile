@@ -14,10 +14,9 @@ RUN if [ -f package-lock.json ]; then \
 		else \
 			npm install --legacy-peer-deps --silent; \
 		fi && \
-		# ensure ajv v6 exists for ajv-keywords/terser-webpack-plugin compatibility in some CRA toolchains
-		if ! node -e "process.exit(require('fs').existsSync(require.resolve('ajv'))?0:1)" 2>/dev/null; then \
-			npm install ajv@6.12.6 --no-audit --no-fund --silent || true; \
-		fi
+		# Force-install compatible ajv and ajv-keywords versions to avoid "ajv/dist/compile/codegen" missing
+		# which some terser-webpack-plugin / ajv-keywords combos expect during CRA build.
+		npm install ajv@6.12.6 ajv-keywords@3.5.2 --no-audit --no-fund --legacy-peer-deps --silent || true
 
 # copy frontend sources (root-level CRA)
 COPY public ./public

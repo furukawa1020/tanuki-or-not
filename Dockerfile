@@ -41,6 +41,13 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 WORKDIR /app
 
+# Ensure OpenSSL 3 runtime library (libssl.so.3) and CA certs are available
+# the Rust binary links dynamically to OpenSSL at runtime; without libssl3
+# the container fails with: error while loading shared libraries: libssl.so.3
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libssl3 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 # copy binary
 COPY --from=rust-builder /usr/src/app/target/release/tanuki-quiz-rust /usr/local/bin/tanuki-quiz-rust
 

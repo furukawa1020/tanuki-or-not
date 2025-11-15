@@ -1,4 +1,4 @@
-### Multi-stage Dockerfile: build React frontend then Rust backend, produce single runtime image
+﻿# Multi-stage Dockerfile: build React frontend then Rust backend, produce single runtime image
 
 # 1) Build frontend
 FROM node:18-bullseye as node-builder
@@ -17,7 +17,9 @@ COPY src ./src
 RUN npm run build --silent
 
 # 2) Build Rust backend
-FROM --platform=linux/amd64 rust:1.72-slim as rust-builder
+# Use a current stable Rust image so Cargo understands lockfile v4 created by newer Cargo.
+# Using the `rust:latest` image ensures Cargo/Cargo.lock compatibility in CI/build environments.
+FROM --platform=linux/amd64 rust:latest as rust-builder
 WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev libjpeg-dev libpng-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 

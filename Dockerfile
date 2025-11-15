@@ -9,7 +9,15 @@ COPY package.json package-lock.json* ./
 # copy optional package files from rust subfolder if present
 RUN if [ -f tanuki-quiz-rust/package.json ]; then mkdir -p ./tanuki-quiz-rust && cp tanuki-quiz-rust/package.json ./tanuki-quiz-rust/ || true; fi
 # install dependencies reliably (use npm install so missing lockfile won't fail)
-RUN npm install --legacy-peer-deps --silent
+RUN if [ -f package-lock.json ]; then \
+			npm ci --legacy-peer-deps --silent || npm install --legacy-peer-deps --silent; \
+		else \
+			npm install --legacy-peer-deps --silent; \
+		fi && \
+		# ensure ajv v6 exists for ajv-keywords/terser-webpack-plugin compatibility in some CRA toolchains
+		if ! node -e "process.exit(require('fs').existsSync(require.resolve('ajv'))?0:1)" 2>/dev/null; then \
+			npm install ajv@6.12.6 --no-audit --no-fund --silent || true; \
+		fi
 
 # copy frontend sources (root-level CRA)
 COPY public ./public

@@ -9,22 +9,26 @@ const embeddedImages = {
 
 // Prefer serving local real photos from /assets/*.jpg (place files in public/assets/),
 // but fall back to embedded SVGs when no file is found.
-const animals = [
-  { name: 'タヌキ', imageLocal: '/assets/tanuki1.jpg', fallbackKey: 'tanuki' },
-  { name: 'アナグマ', imageLocal: '/assets/anaguma1.jpg', fallbackKey: 'anaguma' },
-  { name: 'ハクビシン', imageLocal: '/assets/hakubishin1.jpg', fallbackKey: 'hakubishin' },
+const animalDefs = [
+  { name: 'タヌキ', key: 'tanuki', count: 5 },
+  { name: 'アナグマ', key: 'anaguma', count: 5 },
+  { name: 'ハクビシン', key: 'hakubishin', count: 5 },
 ];
 
-// questions配列を生成
-const questions = animals.map((animal) => {
-  return {
-    // start with local path; <img onError> will fall back to embedded SVG if missing
-    image: animal.imageLocal,
-    fallbackKey: animal.fallbackKey,
-    options: animals.map((a) => ({ answerText: a.name, isCorrect: a.name === animal.name })),
-    correctAnswer: animal.name,
-  };
-});
+// Build questions with randomized images (called at quiz start / retry)
+function buildQuestions() {
+  const optionsTemplate = animalDefs.map((a) => ({ answerText: a.name }));
+  return animalDefs.map((animal) => {
+    const n = Math.floor(Math.random() * animal.count) + 1;
+    const imagePath = `/assets/${animal.key}${n}.jpg`;
+    return {
+      image: imagePath,
+      fallbackKey: animal.key,
+      options: optionsTemplate.map((o) => ({ ...o, isCorrect: o.answerText === animal.name })),
+      correctAnswer: animal.name,
+    };
+  });
+}
 
 
 function QuestionImage({ question, embeddedImages }) {
@@ -85,6 +89,7 @@ function App() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [score, setScore] = useState(0);
   const [showScore, setShowScore] = useState(false);
+  const [questions, setQuestions] = useState(() => buildQuestions());
 
   const handleAnswerButtonClick = (isCorrect) => {
     if (isCorrect) {
@@ -119,7 +124,13 @@ function App() {
           <button onClick={shareOnTwitter} className="share-button">
             Xで結果をシェア
           </button>
-          <button onClick={() => window.location.reload()} className="retry-button">
+          <button onClick={() => {
+              // regenerate randomized questions and reset state
+              setQuestions(buildQuestions());
+              setScore(0);
+              setCurrentQuestion(0);
+              setShowScore(false);
+            }} className="retry-button">
             もう一度挑戦
           </button>
         </div>
